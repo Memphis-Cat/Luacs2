@@ -1,0 +1,61 @@
+{
+  "WaterLevelGravity": {
+    "signatures": {
+      "library": "server",
+      "windows": "3C 01 49 8B 5B 10 49 8B 7B 18 0F 97 C0 41 0F 28"
+    }
+  },
+  "CheckJumpButtonWater": {
+    "signatures": {
+      "library": "server",
+      "windows": "C8 42 EB ? 48 8B 4B 30"
+    }
+  },
+  "CategorizeUnderwater": {
+    "signatures": {
+      "library": "server",
+      "windows": "75 ? B3 01 EB ? 32 DB 45 32 ?"
+    }
+  },
+  "CPhysBox_Use": {
+    "signatures": {
+      "library": "server",
+      "windows": "4C 8B 47 08 48 8D 8B ? ? ? ? 48 8B 17 4C 8D 4C 24 ?"
+    }
+  },
+  "BotNavIgnore": {
+    "signatures": {
+      "library": "server",
+      "windows": "0F 84 ? ? ? ? 80 B8 ? ? ? ? 00 0F 84 ? ? ? ? 80 3D ? ? ? ? 00 74 15"
+    }
+  },
+  "ServerMovementUnlock": {
+    "signatures": {
+      "library": "server",
+      "windows": "76 ? F2 0F 10 57 ? 0F 28 ? F3 0F ? ? 0F 28 ?"
+    }
+  },
+  "ProcessUsercmds": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 44 88 48 20 44 89 40 18 48 89 50 10 53"
+    }
+  },
+  "TriggerPush_Touch": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 74 24 18 48 89 7C 24 20 55 48 8D AC 24 40 E0 FF FF"
+    }
+  },
+  "SetGroundEntity": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 10 48 89 6C 24 18 56 57 41 55 41 56 41 57 48 83 EC 20 33 ED"
+    }
+  },
+  "PassesTriggerFilters": {
+    "offsets": {
+      "windows": 258
+    }
+  }
+}

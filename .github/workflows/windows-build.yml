@@ -1,0 +1,29 @@
+name: Windows build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-smoke-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure MSVC and build
+        shell: cmd
+        run: |
+          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+          build.bat --no-deploy
+
+      - name: Compiler smoke tests
+        shell: powershell
+        run: ./tests/compiler-smoke.ps1
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuaCS-Windows-x64
+          path: build/package/game/csgo/addons
+          if-no-files-found: error

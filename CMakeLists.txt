@@ -1,0 +1,152 @@
+cmake_minimum_required(VERSION 3.26)
+project(LuaCS VERSION 0.1.0 LANGUAGES C CXX)
+
+if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "LuaCS currently targets 64-bit Windows CS2 servers only.")
+endif()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+set(LUACS_PACKAGE_ROOT "${CMAKE_BINARY_DIR}/package/game/csgo/addons")
+set(LUACS_ROOT "${LUACS_PACKAGE_ROOT}/LuaCS")
+set(LUACS_BIN "${LUACS_ROOT}/bin")
+set(LUACS_SCRIPTING "${LUACS_ROOT}/scripting")
+
+function(luacs_runtime_output target directory)
+    set_target_properties(${target} PROPERTIES
+        PREFIX ""
+        RUNTIME_OUTPUT_DIRECTORY "${directory}"
+        LIBRARY_OUTPUT_DIRECTORY "${directory}"
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${directory}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${directory}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${directory}"
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${directory}")
+endfunction()
+
+file(GLOB LUA_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/thirdparty/lua-5.5.1/src/*.c")
+list(FILTER LUA_SOURCES EXCLUDE REGEX "/(lua|luac|onelua)\\.c$")
+add_library(lua55 SHARED ${LUA_SOURCES})
+target_include_directories(lua55 PUBLIC "${CMAKE_SOURCE_DIR}/thirdparty/lua-5.5.1/src")
+target_compile_definitions(lua55 PRIVATE LUA_BUILD_AS_DLL LUA_CORE LUA_LIB)
+target_compile_definitions(lua55 INTERFACE LUA_BUILD_AS_DLL)
+luacs_runtime_output(lua55 "${LUACS_BIN}")
+
+add_library(lua55_static STATIC ${LUA_SOURCES})
+target_include_directories(lua55_static PUBLIC "${CMAKE_SOURCE_DIR}/thirdparty/lua-5.5.1/src")
+target_compile_definitions(lua55_static PRIVATE LUA_CORE LUA_LIB)
+set_target_properties(lua55_static PROPERTIES OUTPUT_NAME "lua55-static")
+
+add_library(luacs_common STATIC
+    src/common/smg.cpp
+    src/common/smg.h)
+target_include_directories(luacs_common PUBLIC src/common)
+target_link_libraries(luacs_common PUBLIC bcrypt)
+target_compile_definitions(luacs_common PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+
+add_executable(luacs_compile src/compiler/main.cpp)
+target_link_libraries(luacs_compile PRIVATE lua55_static luacs_common)
+target_include_directories(luacs_compile PRIVATE thirdparty/lua-5.5.1/src src/common)
+set_target_properties(luacs_compile PROPERTIES OUTPUT_NAME "compile")
+luacs_runtime_output(luacs_compile "${LUACS_SCRIPTING}")
+
+function(add_luacs_module module source)
+    add_library(${module} SHARED ${source})
+    target_include_directories(${module} PRIVATE include thirdparty/lua-5.5.1/src)
+    target_link_libraries(${module} PRIVATE lua55)
+    target_compile_definitions(${module} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    set_target_properties(${module} PROPERTIES OUTPUT_NAME "${module}")
+    luacs_runtime_output(${module} "${LUACS_BIN}")
+endfunction()
+
+add_luacs_module(events src/modules/events/events.cpp)
+add_luacs_module(timers src/modules/timers/timers.cpp)
+add_luacs_module(players src/modules/players/players.cpp)
+add_luacs_module(commands src/modules/commands/commands.cpp)
+add_luacs_module(math src/modules/math/math.cpp)
+
+set(MMSOURCE_ROOT "${CMAKE_SOURCE_DIR}/deps/metamod-source" CACHE PATH "Metamod:Source source tree")
+set(HL2SDK_CS2_ROOT "${CMAKE_SOURCE_DIR}/deps/hl2sdk-cs2" CACHE PATH "AlliedModders HL2SDK cs2 branch")
+
+if(NOT EXISTS "${MMSOURCE_ROOT}/core/ISmmPlugin.h")
+    message(FATAL_ERROR "Metamod source not found at ${MMSOURCE_ROOT}. Run build.bat so dependencies are fetched.")
+endif()
+if(NOT EXISTS "${HL2SDK_CS2_ROOT}/public/iserver.h")
+    message(FATAL_ERROR "HL2SDK CS2 not found at ${HL2SDK_CS2_ROOT}. Run build.bat so dependencies are fetched.")
+endif()
+
+add_library(luacs_runtime STATIC
+    src/runtime/runtime.cpp
+    src/runtime/runtime_events.cpp
+    src/runtime/runtime_services.cpp
+    src/runtime/runtime_lua.cpp
+    src/runtime/runtime.h
+    src/runtime/runtime_helpers.h)
+target_include_directories(luacs_runtime PUBLIC
+    include src/common src/runtime thirdparty/lua-5.5.1/src)
+target_link_libraries(luacs_runtime PUBLIC lua55 luacs_common)
+target_compile_definitions(luacs_runtime PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+
+add_library(luacs2 SHARED
+    src/plugin/plugin.cpp
+    src/plugin/plugin.h
+    "${HL2SDK_CS2_ROOT}/public/tier0/memoverride.cpp"
+    "${HL2SDK_CS2_ROOT}/tier1/convar.cpp")
+
+target_include_directories(luacs2 PRIVATE
+    include src/common src/runtime src/plugin thirdparty/lua-5.5.1/src
+    "${MMSOURCE_ROOT}/core"
+    "${MMSOURCE_ROOT}/core/sourcehook"
+    "${HL2SDK_CS2_ROOT}/public"
+    "${HL2SDK_CS2_ROOT}/public/engine"
+    "${HL2SDK_CS2_ROOT}/public/entity2"
+    "${HL2SDK_CS2_ROOT}/public/game/server"
+    "${HL2SDK_CS2_ROOT}/public/mathlib"
+    "${HL2SDK_CS2_ROOT}/public/tier0"
+    "${HL2SDK_CS2_ROOT}/public/tier1"
+    "${HL2SDK_CS2_ROOT}/game/shared"
+    "${HL2SDK_CS2_ROOT}/game/server"
+    "${HL2SDK_CS2_ROOT}/common"
+    "${HL2SDK_CS2_ROOT}/thirdparty/protobuf-3.21.8/src")
+
+target_compile_definitions(luacs2 PRIVATE
+    META_IS_SOURCE2
+    SE_CS2=25
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    _CRT_SECURE_NO_WARNINGS
+    _CRT_NONSTDC_NO_DEPRECATE)
+
+target_link_libraries(luacs2 PRIVATE
+    luacs_runtime
+    "${HL2SDK_CS2_ROOT}/lib/public/win64/tier0.lib"
+    "${HL2SDK_CS2_ROOT}/lib/public/win64/interfaces.lib"
+    "${HL2SDK_CS2_ROOT}/lib/public/win64/mathlib.lib"
+    "${HL2SDK_CS2_ROOT}/lib/public/win64/2015/libprotobuf.lib"
+    ws2_32)
+set_target_properties(luacs2 PROPERTIES OUTPUT_NAME "luacs2")
+luacs_runtime_output(luacs2 "${LUACS_BIN}")
+
+add_custom_target(luacs_package ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${LUACS_ROOT}/plugins"
+        "${LUACS_ROOT}/config"
+        "${LUACS_ROOT}/logs"
+        "${LUACS_ROOT}/gamedata/reference"
+        "${LUACS_PACKAGE_ROOT}/metamod"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/packaging/addons/metamod/luacs2.vdf"
+        "${LUACS_PACKAGE_ROOT}/metamod/luacs2.vdf"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/packaging/LuaCS/scripting/example_welcome.lua"
+        "${LUACS_SCRIPTING}/example_welcome.lua"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/gamedata/deprecated_symbols.txt"
+        "${LUACS_ROOT}/gamedata/deprecated_symbols.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/gamedata/reference"
+        "${LUACS_ROOT}/gamedata/reference"
+    DEPENDS luacs2 luacs_compile events timers players commands math lua55 lua55_static)

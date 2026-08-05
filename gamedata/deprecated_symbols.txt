@@ -1,0 +1,18 @@
+# Exact deprecated symbol names extracted from the uploaded Valve cs_script snapshot.
+# The compiler performs a source-text warning scan; Lua parsing remains authoritative.
+CSDamageType
+DebugBox
+DebugLine
+DebugScreenText
+DebugSphere
+EntFireAtName
+EntFireAtTarget
+GetLocalVelcoity
+GetTraceHit
+IsCrouched
+IsCrouching
+OnBeforePlayerDamage
+OnBeforeReload
+OnReload
+Teleport
+bounces

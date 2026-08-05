@@ -1,0 +1,179 @@
+[
+  {
+    "name": "CounterStrikeSharp official gamedata",
+    "priority": "required",
+    "commit": "db2cd0fe50f6b42bd255348bfe2ad6195b4aed7d",
+    "path": "configs/addons/counterstrikesharp/gamedata/gamedata.json",
+    "raw_url": "https://raw.githubusercontent.com/roflmuffin/CounterStrikeSharp/db2cd0fe50f6b42bd255348bfe2ad6195b4aed7d/configs/addons/counterstrikesharp/gamedata/gamedata.json",
+    "drop_in": true
+  },
+  {
+    "name": "Inventory Simulator gamedata",
+    "priority": "high",
+    "commit": "5e3c96283b3d3f5aeba44822a38031df2e213376",
+    "path": "gamedata/inventory-simulator.json",
+    "raw_url": "https://raw.githubusercontent.com/ianlucas/cs2-css-inventory-simulator/5e3c96283b3d3f5aeba44822a38031df2e213376/gamedata/inventory-simulator.json",
+    "drop_in": true
+  },
+  {
+    "name": "WeaponPaints gamedata",
+    "priority": "high",
+    "commit": "fa8936f3959310acf94de410bc5bd0015f34ff24",
+    "path": "gamedata/weaponpaints.json",
+    "raw_url": "https://raw.githubusercontent.com/Nereziel/cs2-WeaponPaints/fa8936f3959310acf94de410bc5bd0015f34ff24/gamedata/weaponpaints.json",
+    "drop_in": true
+  },
+  {
+    "name": "CSSharp-Fixes gamedata",
+    "priority": "high",
+    "commit": "9f20129bd4d17dcf7f30311ac0d24ec56895b04a",
+    "path": "gamedata/cssharpfixes.json",
+    "raw_url": "https://raw.githubusercontent.com/CharlesBarone/CSSharp-Fixes/9f20129bd4d17dcf7f30311ac0d24ec56895b04a/gamedata/cssharpfixes.json",
+    "drop_in": true
+  },
+  {
+    "name": "EntWatchSharp gamedata",
+    "priority": "high",
+    "commit": "99e95518f0947f7e5143877f95e3d4b6a60096dc",
+    "path": "EntWatchSharp/addons/counterstrikesharp/gamedata/EntWatchSharp.json",
+    "raw_url": "https://raw.githubusercontent.com/darkerz7/EntWatchSharp/99e95518f0947f7e5143877f95e3d4b6a60096dc/EntWatchSharp/addons/counterstrikesharp/gamedata/EntWatchSharp.json",
+    "drop_in": true
+  },
+  {
+    "name": "BotAimImprover hard-coded signatures",
+    "priority": "high",
+    "commit": "4525e770997223d318040078096e83d5623579bb",
+    "path": "addons/counterstrikesharp/plugins/BotAimImprover/BotAimImprover.cs",
+    "raw_url": "https://raw.githubusercontent.com/ed0ard/CS2-Bot-Improver/4525e770997223d318040078096e83d5623579bb/addons/counterstrikesharp/plugins/BotAimImprover/BotAimImprover.cs",
+    "drop_in": false
+  },
+  {
+    "name": "NadeSystem hard-coded signatures",
+    "priority": "high",
+    "commit": "4525e770997223d318040078096e83d5623579bb",
+    "path": "addons/counterstrikesharp/plugins/NadeSystem/NadeSystem.cs",
+    "raw_url": "https://raw.githubusercontent.com/ed0ard/CS2-Bot-Improver/4525e770997223d318040078096e83d5623579bb/addons/counterstrikesharp/plugins/NadeSystem/NadeSystem.cs",
+    "drop_in": false
+  },
+  {
+    "name": "Warcraft memory signatures",
+    "priority": "medium",
+    "commit": "83c8be308680e936b900cbc2c1fcb19384390e82",
+    "path": "WarcraftPlugin/Helpers/Memory.cs",
+    "raw_url": "https://raw.githubusercontent.com/Wngui/CS2WarcraftMod/83c8be308680e936b900cbc2c1fcb19384390e82/WarcraftPlugin/Helpers/Memory.cs",
+    "drop_in": false
+  },
+  {
+    "name": "Infinite Weapons gamedata generator",
+    "priority": "medium",
+    "commit": "cc9c15ded33ac03169e487c158afe4efecc026c9",
+    "path": "src/Gamedata.cs",
+    "raw_url": "https://raw.githubusercontent.com/Kandru/cs2-infinite-weapons/cc9c15ded33ac03169e487c158afe4efecc026c9/src/Gamedata.cs",
+    "drop_in": false
+  },
+  {
+    "name": "SimpleAdmin signatures",
+    "priority": "reference",
+    "commit": "cf284bd1211e081319e6ffc4660bf7e670888979",
+    "path": "CS2-SimpleAdmin/Variables.cs",
+    "raw_url": "https://raw.githubusercontent.com/daffyyyy/CS2-SimpleAdmin/cf284bd1211e081319e6ffc4660bf7e670888979/CS2-SimpleAdmin/Variables.cs",
+    "drop_in": false
+  },
+  {
+    "name": "Poor SharpTimer RunCommand",
+    "priority": "reference",
+    "commit": "862f467fa50d2bd17fda4193f09df38aeb3b6b13",
+    "path": "src/Extensions/RunCommand.cs",
+    "raw_url": "https://raw.githubusercontent.com/Letaryat/poor-sharptimer/862f467fa50d2bd17fda4193f09df38aeb3b6b13/src/Extensions/RunCommand.cs",
+    "drop_in": false
+  },
+  {
+    "name": "CS2 AntiDLL event manager signatures",
+    "priority": "reference",
+    "commit": "0815cb57d4a12978f0a8bf4c5f34cdf8669555e8",
+    "path": "src/AntiDLL/SDK/IGameEventManager2.cs",
+    "raw_url": "https://raw.githubusercontent.com/KillStr3aK/CS2-AntiDLL/0815cb57d4a12978f0a8bf4c5f34cdf8669555e8/src/AntiDLL/SDK/IGameEventManager2.cs",
+    "drop_in": false
+  },
+  {
+    "name": "Retakes Allocator custom gamedata",
+    "priority": "reference",
+    "commit": "95fad69a89000364ca467add3e78e61e6953d7ff",
+    "path": "RetakesAllocator/CustomGameData.cs",
+    "raw_url": "https://raw.githubusercontent.com/yonilerner/cs2-retakes-allocator/95fad69a89000364ca467add3e78e61e6953d7ff/RetakesAllocator/CustomGameData.cs",
+    "drop_in": false
+  },
+  {
+    "name": "CS2TraceRay",
+    "priority": "reference",
+    "commit": "af77abe225efffe9b7610efd74c54f24cd7d7b79",
+    "path": "CS2TraceRay/Class/TraceRay.cs",
+    "raw_url": "https://raw.githubusercontent.com/schwarper/CS2TraceRay/af77abe225efffe9b7610efd74c54f24cd7d7b79/CS2TraceRay/Class/TraceRay.cs",
+    "drop_in": false
+  },
+  {
+    "name": "EmitSoundVolumeFix",
+    "priority": "reference",
+    "commit": "6833577c79ba501afab030d372c8da6c04036794",
+    "path": "Plugin.cs",
+    "raw_url": "https://raw.githubusercontent.com/samyycX/CS2-EmitSoundVolumeFix/6833577c79ba501afab030d372c8da6c04036794/Plugin.cs",
+    "drop_in": false
+  },
+  {
+    "name": "SkyboxChanger",
+    "priority": "reference",
+    "commit": "e6afbb56897cf13aa1266092bea202253ff239a7",
+    "path": "Memory.cs",
+    "raw_url": "https://raw.githubusercontent.com/samyycX/CS2-SkyboxChanger/e6afbb56897cf13aa1266092bea202253ff239a7/Memory.cs",
+    "drop_in": false
+  },
+  {
+    "name": "RMenu RunCommand hook",
+    "priority": "reference",
+    "commit": "75f6caa0ce1c673d951745a63427c085891dd2d6",
+    "path": "src/Hooks/RunCommandHook.cs",
+    "raw_url": "https://raw.githubusercontent.com/oscar-wos/RMenu/75f6caa0ce1c673d951745a63427c085891dd2d6/src/Hooks/RunCommandHook.cs",
+    "drop_in": false
+  },
+  {
+    "name": "TeleportFix",
+    "priority": "reference",
+    "commit": "91a0465bcef860576b95d80dd86d48cc571dccfa",
+    "path": "TeleportFix/TeleportFix.cs",
+    "raw_url": "https://raw.githubusercontent.com/HvH-gg/TeleportFix/91a0465bcef860576b95d80dd86d48cc571dccfa/TeleportFix/TeleportFix.cs",
+    "drop_in": false
+  },
+  {
+    "name": "InheritedSpectate",
+    "priority": "reference",
+    "commit": "8124b74a18efd1ddfe25bb7282b7cf74acbc0539",
+    "path": "src/Plugin.cs",
+    "raw_url": "https://raw.githubusercontent.com/qstage/CS2-InheritedSpectate/8124b74a18efd1ddfe25bb7282b7cf74acbc0539/src/Plugin.cs",
+    "drop_in": false
+  },
+  {
+    "name": "SharpModMenu",
+    "priority": "reference",
+    "commit": "87624d193231ebaee80c7ab03bfa890f75a2f19e",
+    "path": "src/SharpModMenu/SharpModMenu.cs",
+    "raw_url": "https://raw.githubusercontent.com/CSGALS/SharpModMenu/87624d193231ebaee80c7ab03bfa890f75a2f19e/src/SharpModMenu/SharpModMenu.cs",
+    "drop_in": false
+  },
+  {
+    "name": "CS2 MultiFix",
+    "priority": "reference",
+    "commit": "f64c43ba72a919174c8036504800f7a514451072",
+    "path": "multifix.cs",
+    "raw_url": "https://raw.githubusercontent.com/shizangle/cs2-multifix/f64c43ba72a919174c8036504800f7a514451072/multifix.cs",
+    "drop_in": false
+  },
+  {
+    "name": "Fallen Networks SurfFixes Metamod gamedata",
+    "priority": "external-reference",
+    "commit": "b4aad71e2592c6be91e2cc482dcadff9a2dcf285",
+    "path": "gamedata/cs2fixes.games.txt",
+    "raw_url": "https://raw.githubusercontent.com/Fallen-Networks/CS2-SurfFixes-Metamod/b4aad71e2592c6be91e2cc482dcadff9a2dcf285/gamedata/cs2fixes.games.txt",
+    "drop_in": false,
+    "note": "Metamod/SourceMod-style reference; convert manually before CounterStrikeSharp use."
+  }
+]

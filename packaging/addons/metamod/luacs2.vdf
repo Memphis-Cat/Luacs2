@@ -1,0 +1,5 @@
+"Metamod Plugin"
+{
+    "alias"    "luacs"
+    "file"     "addons/LuaCS/bin/luacs2"
+}

@@ -1,0 +1,453 @@
+{
+  "official::UTIL_ClientPrintAll": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 8B E9 49 8B D9"
+    }
+  },
+  "official::ClientPrint": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 85 C9 0F 84 ? ? ? ? 48 89 5C 24 ? 55"
+    }
+  },
+  "official::CCSPlayerController_SwitchTeam": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 57 48 81 EC ? ? ? ? 48 8B D9 8B FA"
+    }
+  },
+  "official::CCSPlayerController_ChangeTeam": {
+    "offsets": {
+      "windows": 103
+    }
+  },
+  "official::CCSPlayerController_Respawn": {
+    "offsets": {
+      "windows": 270
+    }
+  },
+  "official::CBasePlayerController_SetPawn": {
+    "signatures": {
+      "library": "server",
+      "windows": "44 88 4C 24 ? 53 57 41 54"
+    }
+  },
+  "official::CCSPlayerPawnBase_PostThink": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 55 56 41 54 48 8B EC"
+    }
+  },
+  "official::CGameEventManager_Init": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 48 83 EC ? 48 8B 01 48 8B D9 FF 50 ? 48 8B 03"
+    }
+  },
+  "official::GiveNamedItem": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 44 89 44 24"
+    }
+  },
+  "official::UTIL_Remove": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 85 C9 74 ? 48 8B D1 48 8B 0D"
+    }
+  },
+  "official::CBaseModelEntity_SetModel": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 48 83 EC ? 48 8B D9 4C 8B C2 48 8B 0D ? ? ? ? 48 8D 54 24 ? 48 8B 01 FF 50 ? 48 8B 54 24 ? 48 8B CB E8 ? ? ? ? 48 83 C4 ? 5B C3 CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC 48 8B 01"
+    }
+  },
+  "official::CCSPlayer_WeaponServices_CanUse": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 56 41 57 48 83 EC ? 48 8B 01 48 8B FA"
+    }
+  },
+  "official::CCSPlayer_ItemServices_CanAcquire": {
+    "signatures": {
+      "library": "server",
+      "windows": "44 89 44 24 ? 48 89 54 24 ? 48 89 4C 24 ? 55 53 56 57 41 55 41 56 41 57 48 8B EC"
+    }
+  },
+  "official::GetCSWeaponDataFromKey": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 57 48 83 EC ? 33 FF 4C 8B CA 8B D9"
+    }
+  },
+  "official::CCSPlayer_ItemServices_GiveNamedItem": {
+    "offsets": {
+      "windows": 23
+    }
+  },
+  "official::CCSPlayer_ItemServices_DropActivePlayerWeapon": {
+    "offsets": {
+      "windows": 26
+    }
+  },
+  "official::CCSPlayer_ItemServices_RemoveWeapons": {
+    "offsets": {
+      "windows": 27
+    }
+  },
+  "official::CGameSceneNode_GetSkeletonInstance": {
+    "offsets": {
+      "windows": 12
+    }
+  },
+  "official::CCSGameRules_TerminateRound": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 4C 89 48 ? 48 89 48 ? 55 41 54"
+    }
+  },
+  "official::CCSGameRules_FindPickerEntity": {
+    "offsets": {
+      "windows": 26
+    }
+  },
+  "official::CTakeDamageInfo_HitGroup": {
+    "offsets": {
+      "windows": 104
+    }
+  },
+  "official::UTIL_CreateEntityByName": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 83 EC ? C6 44 24 ? ? 4C 8B C1"
+    }
+  },
+  "official::CBaseEntity_DispatchSpawn": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 57 48 83 EC ? 48 8B DA 48 8B F9 48 85 C9 0F 84 ? ? ? ? 48 85 D2"
+    }
+  },
+  "official::CBaseEntity_EmitSoundFilter": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 48 83 EC ? 4C 89 4C 24 ? 48 8B D9 45 8B C8"
+    }
+  },
+  "official::CEntityInstance_AcceptInput": {
+    "signatures": {
+      "library": "server",
+      "windows": "89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 49 8B F0 48 8B D9 48 8B 0D"
+    }
+  },
+  "official::CBaseEntity_IsPlayerPawn": {
+    "offsets": {
+      "windows": 169
+    }
+  },
+  "official::CEntitySystem_AddEntityIOEvent": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 4C 89 4C 24 ? 48 89 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 83 EC ? 49 8B F9"
+    }
+  },
+  "official::LegacyGameEventListener": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B 15 ? ? ? ? 48 85 D2 74 ? 85 C9"
+    }
+  },
+  "official::CBasePlayerPawn_CommitSuicide": {
+    "offsets": {
+      "windows": 384
+    }
+  },
+  "official::CBasePlayerPawn_RemovePlayerItem": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 85 D2 0F 84 ? ? ? ? 48 89 5C 24 ? 57 48 83 EC ? 48 8B DA 48 8B F9 E8"
+    }
+  },
+  "official::CBaseEntity_Teleport": {
+    "offsets": {
+      "windows": 163
+    }
+  },
+  "official::CBaseEntity_TakeDamageOld": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 55 53 56 57 41 54 48 8D 6C 24 ? 48 81 EC ? ? ? ? 4D 8B E0"
+    }
+  },
+  "official::CBaseTrigger_StartTouch": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 57 41 56 48 83 EC ? 48 8B 01"
+    }
+  },
+  "official::CBaseTrigger_EndTouch": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 41 55 48 83 EC ? 83 BA"
+    }
+  },
+  "official::GameEntitySystem": {
+    "offsets": {
+      "windows": 88
+    }
+  },
+  "official::GameEventManager": {
+    "offsets": {
+      "windows": 93
+    }
+  },
+  "official::CEntityIOOutput_FireOutputInternal": {
+    "signatures": {
+      "library": "server",
+      "windows": "4C 89 4C 24 ? 48 89 4C 24 ? 53 56"
+    }
+  },
+  "official::IGameSystem_InitAllSystems_pFirst": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B 1D ? ? ? ? 48 85 DB 0F 84 ? ? ? ? BD"
+    }
+  },
+  "official::CEntityResourceManifest_AddResource": {
+    "offsets": {
+      "windows": 2
+    }
+  },
+  "official::CheckTransmit": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 4C 89 48 ? 48 89 50 ? 48 89 48 ? 55 48 8D A8 ? ? ? ? 48 81 EC ? ? ? ? 48 89 58 ? 48 89 70"
+    }
+  },
+  "official::CheckTransmitPlayerSlot": {
+    "offsets": {
+      "windows": 576
+    }
+  },
+  "official::NetworkStateChanged": {
+    "signatures": {
+      "library": "server",
+      "windows": "4C 8B C2 48 8B D1 48 8B 09"
+    }
+  },
+  "official::SetStateChanged": {
+    "offsets": {
+      "windows": 28
+    }
+  },
+  "official::ISource2GameEntities::CheckTransmit": {
+    "offsets": {
+      "windows": 12
+    }
+  },
+  "official::Host_Say": {
+    "signatures": {
+      "library": "server",
+      "windows": "44 89 4C 24 ? 44 88 44 24"
+    }
+  },
+  "official::CCSNavArea_IsValidNavMesh": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 83 3D ? ? ? ? ? 0F 95 C0 C3 CC CC CC CC C2"
+    }
+  },
+  "inventory-simulator::CAttributeList::SetOrAddAttributeValueByName": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 55 41 56 48 81 EC ? ? ? ? 0F 29 74 24"
+    }
+  },
+  "inventory-simulator::CCSPlayerPawn::IsAbleToApplySpray": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 4C 89 74 24 ? 55 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 49 8B F1"
+    }
+  },
+  "inventory-simulator::CCSPlayerController::ProcessUsercmds": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 44 88 48 20 44 89 40 18 48 89 50 10 53"
+    }
+  },
+  "inventory-simulator::CServerSideClientBase::ActivatePlayer": {
+    "signatures": {
+      "library": "engine2",
+      "windows": "40 53 48 83 EC ? 48 89 6C 24 ? 48 8B D9 48 89 74 24 ? 48 89 7C 24"
+    }
+  },
+  "inventory-simulator::CCSPlayerInventory::GetItemInLoadout": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 56 48 83 EC ? 49 63 F0"
+    }
+  },
+  "inventory-simulator::CEconItemView::CEconItemView": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 54 41 55 41 56 41 57 48 83 EC ? 48 8B F9 48 8D 05"
+    }
+  },
+  "inventory-simulator::CEconItemView::operator=": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 48 83 EC ? 48 8B F9 48 8B F2"
+    }
+  },
+  "inventory-simulator::CCSPlayerInventory::SendInventoryUpdateEvent": {
+    "signatures": {
+      "library": "server",
+      "windows": "83 79 ? ? 0F 10 49"
+    }
+  },
+  "inventory-simulator::CCSPlayer_ItemServices::SetWearables": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 55 41 56 48 83 EC ? 48 83 79"
+    }
+  },
+  "inventory-simulator::CCSPlayerPawn::SetModelFromClass": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 56 57 41 56 48 83 EC ? 48 8B D9"
+    }
+  },
+  "inventory-simulator::CCSPlayerPawn::SetModelFromLoadout": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 56 57 41 54 48 83 EC ? 48 8B F9 45 33 E4"
+    }
+  },
+  "inventory-simulator::GetItemSchema": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 83 EC ? 48 8B 05 ? ? ? ? 48 85 C0 0F 85 ? ? ? ? 48 89 5C 24 ? B9 ? ? ? ? 48 89 7C 24 ? E8 ? ? ? ? 33 FF 48 8B D8 48 85 C0 74 ? 48 8D 05 ? ? ? ? 48 89 7B ? B9 ? ? ? ? 48 89 03 E8 ? ? ? ? 48 85 C0 74 ? 48 8B C8 E8 ? ? ? ? 48 8B F8 48 8D 05 ? ? ? ? 48 89 7B ? 48 89 03 48 8B C7 48 8B 7C 24 ? 48 89 1D ? ? ? ? 48 8B 5C 24 ? 48 83 C4 ? C3 48 8B 47 ? 48 8B 5C 24 ? 48 89 3D ? ? ? ? 48 8B 7C 24 ? 48 83 C4 ? C3 48 8B 40 ? 48 83 C4 ? C3 CC CC CC CC CC CC CC CC CC CC CC CC 48 8B 41"
+    }
+  },
+  "inventory-simulator::CEconItemSchema::GetItemDefinitionByName": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 41 56 80 B9"
+    }
+  },
+  "inventory-simulator::CEconItemSchema::GetItemDefinition": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 57 48 83 EC ? 48 8B D9 89 54 24"
+    }
+  },
+  "inventory-simulator::CCSPlayer_WeaponServices::DropWeapon": {
+    "offsets": {
+      "windows": 28
+    }
+  },
+  "inventory-simulator::CCSPlayerInventory::m_pSOCache": {
+    "offsets": {
+      "windows": 104
+    }
+  },
+  "inventory-simulator::CGCClientSharedObjectCache::m_Owner": {
+    "offsets": {
+      "windows": 40
+    }
+  },
+  "inventory-simulator::CCSPlayerController_InventoryServices::m_pInventory": {
+    "offsets": {
+      "windows": 112
+    }
+  },
+  "inventory-simulator::CServerSideClientBase::m_UserID": {
+    "offsets": {
+      "windows": 160
+    }
+  },
+  "weaponpaints::CAttributeList_SetOrAddAttributeValueByName": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 55 41 56 48 81 EC 90 00 00 00"
+    }
+  },
+  "cssharpfixes::WaterLevelGravity": {
+    "signatures": {
+      "library": "server",
+      "windows": "3C 01 49 8B 5B 10 49 8B 7B 18 0F 97 C0 41 0F 28"
+    }
+  },
+  "cssharpfixes::CheckJumpButtonWater": {
+    "signatures": {
+      "library": "server",
+      "windows": "C8 42 EB ? 48 8B 4B 30"
+    }
+  },
+  "cssharpfixes::CategorizeUnderwater": {
+    "signatures": {
+      "library": "server",
+      "windows": "75 ? B3 01 EB ? 32 DB 45 32 ?"
+    }
+  },
+  "cssharpfixes::CPhysBox_Use": {
+    "signatures": {
+      "library": "server",
+      "windows": "4C 8B 47 08 48 8D 8B ? ? ? ? 48 8B 17 4C 8D 4C 24 ?"
+    }
+  },
+  "cssharpfixes::BotNavIgnore": {
+    "signatures": {
+      "library": "server",
+      "windows": "0F 84 ? ? ? ? 80 B8 ? ? ? ? 00 0F 84 ? ? ? ? 80 3D ? ? ? ? 00 74 15"
+    }
+  },
+  "cssharpfixes::ServerMovementUnlock": {
+    "signatures": {
+      "library": "server",
+      "windows": "76 ? F2 0F 10 57 ? 0F 28 ? F3 0F ? ? 0F 28 ?"
+    }
+  },
+  "cssharpfixes::ProcessUsercmds": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 44 88 48 20 44 89 40 18 48 89 50 10 53"
+    }
+  },
+  "cssharpfixes::TriggerPush_Touch": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 74 24 18 48 89 7C 24 20 55 48 8D AC 24 40 E0 FF FF"
+    }
+  },
+  "cssharpfixes::SetGroundEntity": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 10 48 89 6C 24 18 56 57 41 55 41 56 41 57 48 83 EC 20 33 ED"
+    }
+  },
+  "cssharpfixes::PassesTriggerFilters": {
+    "offsets": {
+      "windows": 258
+    }
+  },
+  "entwatchsharp::CPlayer_WeaponServices_WeaponDrop": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 08 44 89 44 24 18 55"
+    }
+  },
+  "entwatchsharp::CEntityIdentity_AcceptInput": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 54 24 ? 48 89 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC ? ? ? ? 48 8B 02"
+    }
+  },
+  "entwatchsharp::CPlayer_WeaponServices_WeaponPickup": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54 41 56 41 57 48 83 EC 20 4C 8B FA"
+    }
+  }
+}

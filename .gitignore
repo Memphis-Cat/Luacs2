@@ -1,0 +1,18 @@
+/build/
+/deps/
+/.vs/
+*.user
+*.suo
+*.pdb
+*.obj
+*.lib
+*.exp
+*.dll
+*.exe
+*.smg
+*.log
+luacs.key
+
+# Generated from the verified split archive by tools/restore-reference.ps1
+/gamedata/reference/cs2_cs_script_api_2026-08-03.json
+/gamedata/reference/cs2_cs_script_api_2026-08-03.part-*.json

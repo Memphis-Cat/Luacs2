@@ -1,0 +1,261 @@
+{
+  "UTIL_ClientPrintAll": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 8B E9 49 8B D9"
+    }
+  },
+  "ClientPrint": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 85 C9 0F 84 ? ? ? ? 48 89 5C 24 ? 55"
+    }
+  },
+  "CCSPlayerController_SwitchTeam": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 57 48 81 EC ? ? ? ? 48 8B D9 8B FA"
+    }
+  },
+  "CCSPlayerController_ChangeTeam": {
+    "offsets": {
+      "windows": 103
+    }
+  },
+  "CCSPlayerController_Respawn": {
+    "offsets": {
+      "windows": 270
+    }
+  },
+  "CBasePlayerController_SetPawn": {
+    "signatures": {
+      "library": "server",
+      "windows": "44 88 4C 24 ? 53 57 41 54"
+    }
+  },
+  "CCSPlayerPawnBase_PostThink": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 55 56 41 54 48 8B EC"
+    }
+  },
+  "CGameEventManager_Init": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 48 83 EC ? 48 8B 01 48 8B D9 FF 50 ? 48 8B 03"
+    }
+  },
+  "GiveNamedItem": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 74 24 ? 48 89 7C 24 ? 44 89 44 24"
+    }
+  },
+  "UTIL_Remove": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 85 C9 74 ? 48 8B D1 48 8B 0D"
+    }
+  },
+  "CBaseModelEntity_SetModel": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 48 83 EC ? 48 8B D9 4C 8B C2 48 8B 0D ? ? ? ? 48 8D 54 24 ? 48 8B 01 FF 50 ? 48 8B 54 24 ? 48 8B CB E8 ? ? ? ? 48 83 C4 ? 5B C3 CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC 48 8B 01"
+    }
+  },
+  "CCSPlayer_WeaponServices_CanUse": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 48 89 6C 24 ? 56 57 41 54 41 56 41 57 48 83 EC ? 48 8B 01 48 8B FA"
+    }
+  },
+  "CCSPlayer_ItemServices_CanAcquire": {
+    "signatures": {
+      "library": "server",
+      "windows": "44 89 44 24 ? 48 89 54 24 ? 48 89 4C 24 ? 55 53 56 57 41 55 41 56 41 57 48 8B EC"
+    }
+  },
+  "GetCSWeaponDataFromKey": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 57 48 83 EC ? 33 FF 4C 8B CA 8B D9"
+    }
+  },
+  "CCSPlayer_ItemServices_GiveNamedItem": {
+    "offsets": {
+      "windows": 23
+    }
+  },
+  "CCSPlayer_ItemServices_DropActivePlayerWeapon": {
+    "offsets": {
+      "windows": 26
+    }
+  },
+  "CCSPlayer_ItemServices_RemoveWeapons": {
+    "offsets": {
+      "windows": 27
+    }
+  },
+  "CGameSceneNode_GetSkeletonInstance": {
+    "offsets": {
+      "windows": 12
+    }
+  },
+  "CCSGameRules_TerminateRound": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 4C 89 48 ? 48 89 48 ? 55 41 54"
+    }
+  },
+  "CCSGameRules_FindPickerEntity": {
+    "offsets": {
+      "windows": 26
+    }
+  },
+  "CTakeDamageInfo_HitGroup": {
+    "offsets": {
+      "windows": 104
+    }
+  },
+  "UTIL_CreateEntityByName": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 83 EC ? C6 44 24 ? ? 4C 8B C1"
+    }
+  },
+  "CBaseEntity_DispatchSpawn": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 57 48 83 EC ? 48 8B DA 48 8B F9 48 85 C9 0F 84 ? ? ? ? 48 85 D2"
+    }
+  },
+  "CBaseEntity_EmitSoundFilter": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 48 83 EC ? 4C 89 4C 24 ? 48 8B D9 45 8B C8"
+    }
+  },
+  "CEntityInstance_AcceptInput": {
+    "signatures": {
+      "library": "server",
+      "windows": "89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 49 8B F0 48 8B D9 48 8B 0D"
+    }
+  },
+  "CBaseEntity_IsPlayerPawn": {
+    "offsets": {
+      "windows": 169
+    }
+  },
+  "CEntitySystem_AddEntityIOEvent": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 89 5C 24 ? 4C 89 4C 24 ? 48 89 4C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 83 EC ? 49 8B F9"
+    }
+  },
+  "LegacyGameEventListener": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B 15 ? ? ? ? 48 85 D2 74 ? 85 C9"
+    }
+  },
+  "CBasePlayerPawn_CommitSuicide": {
+    "offsets": {
+      "windows": 384
+    }
+  },
+  "CBasePlayerPawn_RemovePlayerItem": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 85 D2 0F 84 ? ? ? ? 48 89 5C 24 ? 57 48 83 EC ? 48 8B DA 48 8B F9 E8"
+    }
+  },
+  "CBaseEntity_Teleport": {
+    "offsets": {
+      "windows": 163
+    }
+  },
+  "CBaseEntity_TakeDamageOld": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 55 53 56 57 41 54 48 8D 6C 24 ? 48 81 EC ? ? ? ? 4D 8B E0"
+    }
+  },
+  "CBaseTrigger_StartTouch": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 57 41 56 48 83 EC ? 48 8B 01"
+    }
+  },
+  "CBaseTrigger_EndTouch": {
+    "signatures": {
+      "library": "server",
+      "windows": "40 53 41 55 48 83 EC ? 83 BA"
+    }
+  },
+  "GameEntitySystem": {
+    "offsets": {
+      "windows": 88
+    }
+  },
+  "GameEventManager": {
+    "offsets": {
+      "windows": 93
+    }
+  },
+  "CEntityIOOutput_FireOutputInternal": {
+    "signatures": {
+      "library": "server",
+      "windows": "4C 89 4C 24 ? 48 89 4C 24 ? 53 56"
+    }
+  },
+  "IGameSystem_InitAllSystems_pFirst": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B 1D ? ? ? ? 48 85 DB 0F 84 ? ? ? ? BD"
+    }
+  },
+  "CEntityResourceManifest_AddResource": {
+    "offsets": {
+      "windows": 2
+    }
+  },
+  "CheckTransmit": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B C4 4C 89 48 ? 48 89 50 ? 48 89 48 ? 55 48 8D A8 ? ? ? ? 48 81 EC ? ? ? ? 48 89 58 ? 48 89 70"
+    }
+  },
+  "CheckTransmitPlayerSlot": {
+    "offsets": {
+      "windows": 576
+    }
+  },
+  "NetworkStateChanged": {
+    "signatures": {
+      "library": "server",
+      "windows": "4C 8B C2 48 8B D1 48 8B 09"
+    }
+  },
+  "SetStateChanged": {
+    "offsets": {
+      "windows": 28
+    }
+  },
+  "ISource2GameEntities::CheckTransmit": {
+    "offsets": {
+      "windows": 12
+    }
+  },
+  "Host_Say": {
+    "signatures": {
+      "library": "server",
+      "windows": "44 89 4C 24 ? 44 88 44 24"
+    }
+  },
+  "CCSNavArea_IsValidNavMesh": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 83 3D ? ? ? ? ? 0F 95 C0 C3 CC CC CC CC C2"
+    }
+  }
+}
