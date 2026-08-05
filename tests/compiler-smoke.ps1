@@ -47,3 +47,4 @@ if ($baselineHash -ne $afterFailureHash) {
 }
 
 Write-Host "LuaCS compiler smoke tests passed."
+exit 0
