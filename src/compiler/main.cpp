@@ -111,9 +111,13 @@ bool compile_one(const std::filesystem::path& source_path,
     }
 
     const std::string chunk_name = "@" + source_path.string();
+    const bool has_utf8_bom = source.size() >= 3 &&
+                              source[0] == 0xEF && source[1] == 0xBB && source[2] == 0xBF;
+    const std::size_t source_offset = has_utf8_bom ? 3 : 0;
     const int load_status = luaL_loadbufferx(state,
-                                             reinterpret_cast<const char*>(source.data()),
-                                             source.size(), chunk_name.c_str(), "t");
+                                             reinterpret_cast<const char*>(source.data() + source_offset),
+                                             source.size() - source_offset,
+                                             chunk_name.c_str(), "t");
     if (load_status != LUA_OK) {
         const char* message = lua_tostring(state, -1);
         std::cerr << "  syntax error: " << (message ? message : "unknown Lua parser error") << "\n";
@@ -129,7 +133,9 @@ bool compile_one(const std::filesystem::path& source_path,
         return false;
     }
 
-    print_warnings(std::string_view(reinterpret_cast<const char*>(source.data()), source.size()),
+    print_warnings(std::string_view(
+                       reinterpret_cast<const char*>(source.data() + source_offset),
+                       source.size() - source_offset),
                    deprecated_symbols);
 
     if (!luacs::smg::write(output_path, source, bytecode, key, error)) {
