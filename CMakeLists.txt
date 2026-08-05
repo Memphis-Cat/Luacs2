@@ -210,6 +210,15 @@ add_custom_target(luacs_package ALL
         "${CMAKE_SOURCE_DIR}/packaging/LuaCS/scripting/example_welcome.lua"
         "${LUACS_SCRIPTING}/example_welcome.lua"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/packaging/LuaCS/config/README.txt"
+        "${LUACS_ROOT}/config/README.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/packaging/LuaCS/plugins/README.txt"
+        "${LUACS_ROOT}/plugins/README.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/packaging/LuaCS/logs/README.txt"
+        "${LUACS_ROOT}/logs/README.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/gamedata/deprecated_symbols.txt"
         "${LUACS_ROOT}/gamedata/deprecated_symbols.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
