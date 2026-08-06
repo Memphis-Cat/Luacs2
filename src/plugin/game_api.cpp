@@ -163,7 +163,9 @@ struct LuaCSGameApi::Impl {
     using RemoveWeaponsFn = void(__fastcall*)(void*);
     using DropActiveWeaponFn = void(__fastcall*)(void*, void*);
 
-    CGameEntitySystem* entity_system{};
+    void* game_resource_service{};
+    std::size_t game_entity_system_offset{};
+    mutable CGameEntitySystem* entity_system{};
     CSchemaSystem* schema_system{};
     CSchemaSystemTypeScope* server_scope{};
     ICvar* cvars{};
@@ -177,11 +179,23 @@ struct LuaCSGameApi::Impl {
     std::ptrdiff_t weapon_services_offset{};
     std::ptrdiff_t active_weapon_offset{};
 
+    CGameEntitySystem* current_entity_system() const {
+        if (entity_system) return entity_system;
+        if (!game_resource_service || game_entity_system_offset == 0) return nullptr;
+
+        auto** location = reinterpret_cast<CGameEntitySystem**>(
+            reinterpret_cast<std::uint8_t*>(game_resource_service) +
+            game_entity_system_offset);
+        if (location) entity_system = *location;
+        return entity_system;
+    }
+
     CEntityInstance* entity_by_index(int index) const {
-        if (!entity_system || index < 0 || index >= MAX_TOTAL_ENTITIES) return nullptr;
+        CGameEntitySystem* system = current_entity_system();
+        if (!system || index < 0 || index >= MAX_TOTAL_ENTITIES) return nullptr;
         const int chunk_index = index / MAX_ENTITIES_IN_LIST;
         const int entry_index = index % MAX_ENTITIES_IN_LIST;
-        CEntityIdentity* chunk = entity_system->m_EntityList.m_pIdentityChunks[chunk_index];
+        CEntityIdentity* chunk = system->m_EntityList.m_pIdentityChunks[chunk_index];
         if (!chunk) return nullptr;
         CEntityIdentity* identity = &chunk[entry_index];
         if (!identity->m_pInstance || identity->m_EHandle.GetEntryIndex() != index) {
@@ -203,6 +217,10 @@ struct LuaCSGameApi::Impl {
     CEntityInstance* controller(int slot, std::string& error) const {
         if (!valid_slot(slot)) {
             error = "player slot must be between 0 and 63";
+            return nullptr;
+        }
+        if (!current_entity_system()) {
+            error = "GameEntitySystem is not ready yet; retry after the server has started a map";
             return nullptr;
         }
         CEntityInstance* result = entity_by_index(slot + 1);
@@ -390,6 +408,7 @@ bool LuaCSGameApi::initialize(const std::filesystem::path& luacs_root,
                               std::string& error) {
     shutdown();
     impl_ = std::make_unique<Impl>();
+    error.clear();
 
     const auto gamedata_path =
         luacs_root / "gamedata" / "reference" / "official_windows_gamedata.json";
@@ -425,23 +444,20 @@ bool LuaCSGameApi::initialize(const std::filesystem::path& luacs_root,
         return false;
     }
 
-    void* game_resource_service =
+    impl_->game_resource_service =
         engine_factory("GameResourceServiceServerV001", nullptr);
+    impl_->game_entity_system_offset = *game_entity_system_offset;
     impl_->schema_system = static_cast<CSchemaSystem*>(
         schema_factory(SCHEMASYSTEM_INTERFACE_VERSION, nullptr));
     impl_->cvars = static_cast<ICvar*>(cvar_factory("VEngineCvar007", nullptr));
-    if (!game_resource_service || !impl_->schema_system || !impl_->cvars) {
+    if (!impl_->game_resource_service || !impl_->schema_system || !impl_->cvars) {
         error = "could not acquire GameResourceServiceServerV001, SchemaSystem_001, or VEngineCvar007";
         return false;
     }
     g_pCVar = impl_->cvars;
 
-    impl_->entity_system = *reinterpret_cast<CGameEntitySystem**>(
-        reinterpret_cast<std::uint8_t*>(game_resource_service) +
-        *game_entity_system_offset);
-    if (!impl_->entity_system) {
-        error = "GameEntitySystem pointer was null";
-        return false;
+    if (!impl_->current_entity_system()) {
+        error = "GameEntitySystem is not ready during Metamod Load; entity-backed HUD and weapon operations will retry automatically after server startup";
     }
 
     impl_->server_scope = impl_->schema_system->FindTypeScopeForModule("server.dll");
