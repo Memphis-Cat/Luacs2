@@ -28,7 +28,6 @@ IServerGameDLL* g_server = nullptr;
 IServerGameClients* g_game_clients = nullptr;
 IVEngineServer* g_engine = nullptr;
 HMODULE g_lua_module = nullptr;
-DLL_DIRECTORY_COOKIE g_lua_directory_cookie = nullptr;
 
 namespace {
 
@@ -81,16 +80,9 @@ bool preload_lua(const std::filesystem::path& native_directory, std::string& err
         return false;
     }
 
-    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS |
-                             LOAD_LIBRARY_SEARCH_USER_DIRS);
-    if (!g_lua_directory_cookie) {
-        g_lua_directory_cookie = AddDllDirectory(native_directory.c_str());
-    }
-
     g_lua_module = LoadLibraryExW(
         lua_path.c_str(), nullptr,
-        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS |
-            LOAD_LIBRARY_SEARCH_USER_DIRS);
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!g_lua_module) {
         const DWORD code = GetLastError();
         error = "Could not load " + lua_path.string() + ": " + windows_error(code) +
