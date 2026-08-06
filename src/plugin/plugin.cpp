@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <Color.h>
+#include <igameevents.h>
 #include <tier0/dbg.h>
 
 #include <cstdio>
@@ -12,16 +13,20 @@
 #include <string_view>
 
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
-SH_DECL_HOOK4_void(IServerGameClients, ClientActive, SH_NOATTRIB, 0, CPlayerSlot, bool,
-                   const char*, uint64);
-SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayerSlot,
-                   ENetworkDisconnectionReason, const char*, uint64, const char*);
-SH_DECL_HOOK4_void(IServerGameClients, ClientPutInServer, SH_NOATTRIB, 0, CPlayerSlot,
-                   const char*, int, uint64);
-SH_DECL_HOOK6_void(IServerGameClients, OnClientConnected, SH_NOATTRIB, 0, CPlayerSlot,
-                   const char*, uint64, const char*, const char*, bool);
-SH_DECL_HOOK2_void(IServerGameClients, ClientCommand, SH_NOATTRIB, 0, CPlayerSlot,
-                   const CCommand&);
+SH_DECL_HOOK4_void(IServerGameClients, ClientActive, SH_NOATTRIB, 0,
+                   CPlayerSlot, bool, const char*, uint64);
+SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0,
+                   CPlayerSlot, ENetworkDisconnectionReason, const char*,
+                   uint64, const char*);
+SH_DECL_HOOK4_void(IServerGameClients, ClientPutInServer, SH_NOATTRIB, 0,
+                   CPlayerSlot, const char*, int, uint64);
+SH_DECL_HOOK6_void(IServerGameClients, OnClientConnected, SH_NOATTRIB, 0,
+                   CPlayerSlot, const char*, uint64, const char*, const char*,
+                   bool);
+SH_DECL_HOOK2_void(IServerGameClients, ClientCommand, SH_NOATTRIB, 0,
+                   CPlayerSlot, const CCommand&);
+SH_DECL_HOOK2(IGameEventManager2, FireEvent, SH_NOATTRIB, 0, bool,
+              IGameEvent*, bool);
 
 LuaCSPlugin g_LuaCSPlugin;
 IServerGameDLL* g_server = nullptr;
@@ -39,8 +44,8 @@ std::filesystem::path module_path() {
         reinterpret_cast<LPCWSTR>(&module_path), &module);
 
     std::wstring buffer(32768, L'\0');
-    const DWORD length =
-        GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+    const DWORD length = GetModuleFileNameW(
+        module, buffer.data(), static_cast<DWORD>(buffer.size()));
     if (!length || length >= buffer.size()) return {};
     buffer.resize(length);
     return buffer;
@@ -63,17 +68,20 @@ std::string windows_error(DWORD code) {
         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
             FORMAT_MESSAGE_IGNORE_INSERTS,
         nullptr, code, 0, reinterpret_cast<char*>(&buffer), 0, nullptr);
-    std::string message =
-        length && buffer ? std::string(buffer, length) : "Windows error " + std::to_string(code);
+    std::string message = length && buffer
+                              ? std::string(buffer, length)
+                              : "Windows error " + std::to_string(code);
     if (buffer) LocalFree(buffer);
     while (!message.empty() &&
-           (message.back() == '\r' || message.back() == '\n' || message.back() == ' ')) {
+           (message.back() == '\r' || message.back() == '\n' ||
+            message.back() == ' ')) {
         message.pop_back();
     }
     return message;
 }
 
-bool preload_lua(const std::filesystem::path& native_directory, std::string& error) {
+bool preload_lua(const std::filesystem::path& native_directory,
+                 std::string& error) {
     const auto lua_path = native_directory / "lua55.dll";
     if (!std::filesystem::exists(lua_path)) {
         error = "Required dependency was not found: " + lua_path.string();
@@ -85,8 +93,8 @@ bool preload_lua(const std::filesystem::path& native_directory, std::string& err
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!g_lua_module) {
         const DWORD code = GetLastError();
-        error = "Could not load " + lua_path.string() + ": " + windows_error(code) +
-                " (" + std::to_string(code) + ")";
+        error = "Could not load " + lua_path.string() + ": " +
+                windows_error(code) + " (" + std::to_string(code) + ")";
         return false;
     }
     return true;
@@ -158,8 +166,8 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
 
     std::string game_api_error;
     if (!game_api_.initialize(root, game_api_error)) {
-        const std::string message = "CS2 engine service initialization failed: " +
-                                    game_api_error;
+        const std::string message =
+            "CS2 engine service initialization failed: " + game_api_error;
         write_console("[ERROR] (lua) " + message);
         copy_error(error, maxlen, message);
         return false;
@@ -167,7 +175,8 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
     if (!game_api_error.empty()) {
         write_console("[WARN] (lua) " + game_api_error);
     }
-    write_console("[INFO] (lua) Initialized HUD and cvar services; entity-backed operations resolve lazily.");
+    write_console(
+        "[INFO] (lua) Initialized live player, event, HUD, cvar, and inventory services.");
 
     std::string runtime_error;
     if (!runtime_.initialize(
@@ -180,13 +189,38 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
             },
             runtime_error)) {
         game_api_.shutdown();
-        const std::string message =
-            runtime_error.empty() ? "LuaCS initialization failed." : runtime_error;
+        const std::string message = runtime_error.empty()
+                                        ? "LuaCS initialization failed."
+                                        : runtime_error;
         write_console("[ERROR] (lua) " + message);
         copy_error(error, maxlen, message);
         return false;
     }
     runtime_.set_host_operations(game_api_.host_operations());
+
+    auto* event_vtable = static_cast<IGameEventManager2*>(
+        game_api_.event_manager_vtable());
+    fire_event_pre_hook_id_ = SH_ADD_DVPHOOK(
+        IGameEventManager2, FireEvent, event_vtable,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_FireEvent), false);
+    fire_event_post_hook_id_ = SH_ADD_DVPHOOK(
+        IGameEventManager2, FireEvent, event_vtable,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_FireEventPost), true);
+    if (fire_event_pre_hook_id_ < 0 || fire_event_post_hook_id_ < 0) {
+        if (fire_event_pre_hook_id_ >= 0) {
+            SH_REMOVE_HOOK_ID(fire_event_pre_hook_id_);
+        }
+        if (fire_event_post_hook_id_ >= 0) {
+            SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
+        }
+        runtime_.shutdown();
+        game_api_.shutdown();
+        const std::string message =
+            "Could not install CGameEventManager::FireEvent pre/post hooks.";
+        write_console("[ERROR] (lua) " + message);
+        copy_error(error, maxlen, message);
+        return false;
+    }
 
     g_SMAPI->AddListener(this, this);
     SH_ADD_HOOK(IServerGameDLL, GameFrame, g_server,
@@ -202,7 +236,7 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
     SH_ADD_HOOK(IServerGameClients, ClientCommand, g_game_clients,
                 SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
 
-    write_console("[INFO] (lua) Installed 6 Source 2 server hooks.");
+    write_console("[INFO] (lua) Installed 8 Source 2 server hooks.");
     runtime_.load_plugins();
     write_console("[INFO] (lua) LuaCS startup completed successfully.");
     return true;
@@ -221,6 +255,15 @@ bool LuaCSPlugin::Unload(char*, size_t) {
                    SH_MEMBER(this, &LuaCSPlugin::Hook_OnClientConnected), false);
     SH_REMOVE_HOOK(IServerGameClients, ClientCommand, g_game_clients,
                    SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
+    if (fire_event_pre_hook_id_ >= 0) {
+        SH_REMOVE_HOOK_ID(fire_event_pre_hook_id_);
+        fire_event_pre_hook_id_ = -1;
+    }
+    if (fire_event_post_hook_id_ >= 0) {
+        SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
+        fire_event_post_hook_id_ = -1;
+    }
+    free_event_copies();
     runtime_.shutdown();
     game_api_.shutdown();
     write_console("[INFO] (lua) LuaCS unloaded.");
@@ -234,7 +277,9 @@ void LuaCSPlugin::OnLevelInit(const char* map_name, const char*, const char*,
     runtime_.level_init(map_name ? map_name : "");
 }
 
-void LuaCSPlugin::OnLevelShutdown() { runtime_.level_shutdown(); }
+void LuaCSPlugin::OnLevelShutdown() {
+    runtime_.level_shutdown();
+}
 
 void LuaCSPlugin::Hook_GameFrame(bool simulating, bool, bool) {
     if (simulating) runtime_.tick();
@@ -253,8 +298,8 @@ void LuaCSPlugin::Hook_ClientDisconnect(CPlayerSlot slot,
                                  network_id ? network_id : "");
 }
 
-void LuaCSPlugin::Hook_ClientPutInServer(CPlayerSlot slot, const char* name, int,
-                                         uint64 xuid) {
+void LuaCSPlugin::Hook_ClientPutInServer(CPlayerSlot slot, const char* name,
+                                         int, uint64 xuid) {
     runtime_.player_put_in_server(slot.Get(), name ? name : "", xuid);
 }
 
@@ -265,6 +310,66 @@ void LuaCSPlugin::Hook_OnClientConnected(CPlayerSlot slot, const char* name,
                               network_id ? network_id : "", fake_player);
 }
 
-void LuaCSPlugin::Hook_ClientCommand(CPlayerSlot slot, const CCommand& command) {
+void LuaCSPlugin::Hook_ClientCommand(CPlayerSlot slot,
+                                     const CCommand& command) {
     runtime_.client_command(slot.Get(), command.GetCommandString());
+}
+
+bool LuaCSPlugin::Hook_FireEvent(IGameEvent* event, bool dont_broadcast) {
+    auto* manager = META_IFACEPTR(IGameEventManager2);
+    game_api_.set_event_manager(manager);
+
+    if (!manager || !event) {
+        event_copies_.push_back(nullptr);
+        RETURN_META_VALUE(MRES_IGNORED, true);
+    }
+
+    event_copies_.push_back(manager->DuplicateEvent(event));
+    const std::uint64_t token =
+        game_api_.begin_event(event, false, dont_broadcast);
+    runtime_.dispatch_game_event(token, event->GetName(), event->GetID(),
+                                 event->IsReliable(), event->IsLocal(), false,
+                                 dont_broadcast);
+    const LuaCSEventDecision decision = game_api_.end_event(token);
+
+    if (decision.cancelled) {
+        manager->FreeEvent(event);
+        RETURN_META_VALUE(MRES_SUPERCEDE, false);
+    }
+    if (decision.dont_broadcast != dont_broadcast) {
+        RETURN_META_VALUE_NEWPARAMS(
+            MRES_IGNORED, true, &IGameEventManager2::FireEvent,
+            (event, decision.dont_broadcast));
+    }
+    RETURN_META_VALUE(MRES_IGNORED, true);
+}
+
+bool LuaCSPlugin::Hook_FireEventPost(IGameEvent*, bool dont_broadcast) {
+    IGameEvent* copy = nullptr;
+    if (!event_copies_.empty()) {
+        copy = event_copies_.back();
+        event_copies_.pop_back();
+    }
+
+    auto* manager = game_api_.event_manager();
+    if (copy) {
+        const std::uint64_t token =
+            game_api_.begin_event(copy, true, dont_broadcast);
+        runtime_.dispatch_game_event(token, copy->GetName(), copy->GetID(),
+                                     copy->IsReliable(), copy->IsLocal(), true,
+                                     dont_broadcast);
+        game_api_.end_event(token);
+        if (manager) manager->FreeEvent(copy);
+    }
+    RETURN_META_VALUE(MRES_IGNORED, true);
+}
+
+void LuaCSPlugin::free_event_copies() {
+    auto* manager = game_api_.event_manager();
+    if (manager) {
+        for (IGameEvent* event : event_copies_) {
+            if (event) manager->FreeEvent(event);
+        }
+    }
+    event_copies_.clear();
 }
