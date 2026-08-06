@@ -87,7 +87,7 @@ add_luacs_module(rounds src/modules/rounds/rounds.cpp)
 add_luacs_module(entities src/modules/entities/entities_build.cpp)
 add_luacs_module(sounds src/modules/sounds/sounds.cpp)
 add_luacs_module(properties src/modules/properties/properties.cpp)
-add_luacs_module(traces src/modules/traces/traces.cpp)
+add_luacs_module(traces src/modules/traces/traces_verified.cpp)
 add_luacs_module(grenades src/modules/grenades/grenades.cpp)
 
 set(MMSOURCE_ROOT "${CMAKE_SOURCE_DIR}/deps/metamod-source" CACHE PATH "Metamod:Source source tree")
