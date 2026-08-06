@@ -18,6 +18,7 @@ $advancedAdapter = Join-Path $root "src\plugin\game_api_advanced_build.cpp"
 $advancedComplete = Join-Path $root "src\plugin\game_api_advanced_complete_build.cpp"
 $advancedFinal = Join-Path $root "src\plugin\game_api_advanced_final_build.cpp"
 $advancedVerified = Join-Path $root "src\plugin\game_api_advanced_verified_build.cpp"
+$advancedSchemaGrenades = Join-Path $root "src\plugin\game_api_advanced_schema_grenades_build.cpp"
 $generatedAdvanced = Join-Path $root "build\generated\advanced\game_api_advanced.cpp"
 $propertiesSource = Join-Path $root "src\modules\properties\properties.cpp"
 $tracesSource = Join-Path $root "src\modules\traces\traces.cpp"
@@ -88,8 +89,9 @@ try {
     Assert-SourceTokens $cmakeFile @(
         "LUACS_LEGACY_NATIVE_RAY",
         "using NativeRay = Ray_t;",
+        "CMAKE_CONFIGURE_DEPENDS",
         "generated/advanced",
-        "game_api_advanced_verified_build.cpp",
+        "game_api_advanced_schema_grenades_build.cpp",
         "add_luacs_module(traces src/modules/traces/traces_verified.cpp)",
         "sourcehook_impl_chookmaninfo.cpp"
     )
@@ -143,6 +145,22 @@ try {
         "sizeof(Ray_t) == sizeof(LuaCSAdvancedApi::NativeRay)",
         "trace object_set_mask contains unsupported Source 2 bits",
         "services.trace = &trace_verified"
+    )
+    Assert-SourceTokens $advancedSchemaGrenades @(
+        '#include "game_api_advanced_verified_build.cpp"',
+        '"m_vInitialPosition"',
+        '"m_vInitialVelocity"',
+        '"m_vecOriginalSpawnLocation"',
+        '"m_bIsLive"',
+        '"m_bDetonationRecorded"',
+        '"m_flSpawnTime"',
+        '"m_flDetonateTime"',
+        "schedule_schema_fuse",
+        "services.grenade_spawn = &grenade_spawn_schema",
+        "services.grenade_detonate = &grenade_detonate_schema"
+    )
+    Assert-SourceOmits $advancedSchemaGrenades @(
+        '"Detonate"'
     )
     Assert-SourceTokens $propertiesSource @(
         '"get_raw"',
@@ -232,7 +250,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, real Ray_t resolver, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
+    Write-Host "LuaCS package, real Ray_t resolver, schema-native grenades, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
