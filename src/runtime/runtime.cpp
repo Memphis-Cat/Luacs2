@@ -239,6 +239,8 @@ void Runtime::shutdown() {
     state_map_.clear();
     scripts_.clear();
     players_.clear();
+    plugin_metadata_cache_.clear();
+    plugin_failures_.clear();
     next_timer_id_ = 1;
     next_event_subscription_id_ = 1;
     host_operations_ = {};
@@ -289,31 +291,33 @@ void Runtime::load_plugins() {
 }
 
 bool Runtime::load_plugin(const std::filesystem::path& path) {
+    const std::string key = normalize_name(path.stem().string());
+    const auto fail = [&](std::string message) {
+        plugin_failures_[key] = message;
+        log_runtime("[ERROR] Could not load " + path.filename().string() +
+                    ": " + message);
+        return false;
+    };
+
     smg::Package package;
     std::string error;
-    if (!smg::read(path, key_, package, error)) {
-        log_runtime("[ERROR] Could not load " + path.filename().string() +
-                    ": " + error);
-        return false;
-    }
+    if (!smg::read(path, key_, package, error)) return fail(error);
 
     auto vm = std::make_unique<ScriptVm>();
     vm->runtime = this;
     vm->source_path = path;
     vm->name = path.stem().string();
+    vm->author = "Unknown";
+    vm->version = "Unspecified";
     vm->log_path = create_log_path();
     vm->state = luaL_newstate();
-    if (!vm->state) {
-        log_runtime("[ERROR] Could not create Lua state for " + vm->name);
-        return false;
-    }
+    if (!vm->state) return fail("could not create a Lua state");
 
     {
         std::ofstream create_plugin_log(vm->log_path, std::ios::app);
         if (!create_plugin_log) {
-            log_runtime("[ERROR] Could not create plugin log " +
+            return fail("could not create plugin log " +
                         vm->log_path.string());
-            return false;
         }
     }
 
@@ -322,7 +326,7 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
     if (!install_core(*vm)) {
         log(*vm, "[ERROR] Core API initialization failed.");
         state_map_.erase(vm->state);
-        return false;
+        return fail("core API initialization failed; see the plugin log");
     }
 
     const int status = luaL_loadbufferx(
@@ -331,19 +335,67 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
         package.bytecode.size(), vm->name.c_str(), "b");
     if (status != LUA_OK) {
         const char* message = lua_tostring(vm->state, -1);
-        log(*vm, std::string("[ERROR] Bytecode load failed: ") +
-                     (message ? message : "unknown Lua error"));
+        const std::string detail =
+            message ? message : "unknown Lua bytecode error";
+        log(*vm, "[ERROR] Bytecode load failed: " + detail);
         state_map_.erase(vm->state);
-        return false;
+        return fail("bytecode load failed: " + detail);
     }
     if (!protected_call(*vm, 0, 0, "plugin startup")) {
         state_map_.erase(vm->state);
-        return false;
+        return fail("plugin startup failed; see the plugin log");
     }
 
+    read_plugin_metadata(*vm);
+    plugin_failures_.erase(key);
+    plugin_metadata_cache_[key] =
+        PluginMetadata{vm->name, vm->author, vm->version, vm->description};
     log(*vm, "Loaded plugin '" + vm->name + "' from " + path.string());
     scripts_.push_back(std::move(vm));
     return true;
+}
+
+void Runtime::read_plugin_metadata(ScriptVm& vm) {
+    PluginMetadata metadata;
+    metadata.name = vm.source_path.stem().string();
+    metadata.author = "Unknown";
+    metadata.version = "Unspecified";
+
+    lua_getglobal(vm.state, "plugin");
+    if (lua_istable(vm.state, -1)) {
+        const int table = lua_absindex(vm.state, -1);
+        const auto read_field = [&](const char* field,
+                                    std::size_t maximum) -> std::string {
+            lua_getfield(vm.state, table, field);
+            std::string value;
+            if (lua_type(vm.state, -1) == LUA_TSTRING) {
+                std::size_t length{};
+                const char* text = lua_tolstring(vm.state, -1, &length);
+                if (text && length != 0) {
+                    value.assign(text, std::min(length, maximum));
+                }
+            }
+            lua_pop(vm.state, 1);
+            return value;
+        };
+
+        if (auto value = read_field("name", 256); !value.empty()) {
+            metadata.name = std::move(value);
+        }
+        if (auto value = read_field("author", 256); !value.empty()) {
+            metadata.author = std::move(value);
+        }
+        if (auto value = read_field("version", 128); !value.empty()) {
+            metadata.version = std::move(value);
+        }
+        metadata.description = read_field("description", 1024);
+    }
+    lua_pop(vm.state, 1);
+
+    vm.name = std::move(metadata.name);
+    vm.author = std::move(metadata.author);
+    vm.version = std::move(metadata.version);
+    vm.description = std::move(metadata.description);
 }
 
 void Runtime::tick() {
