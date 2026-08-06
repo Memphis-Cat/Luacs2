@@ -5,6 +5,8 @@
 // functions without exporting private engine pointers.
 #include "game_api_advanced_build.cpp"
 
+#include <initializer_list>
+
 namespace {
 
 using luacs::GrenadeInfo;
@@ -23,7 +25,7 @@ bool same_vector(const luacs::Vector3& left, const luacs::Vector3& right) {
     return left.x == right.x && left.y == right.y && left.z == right.z;
 }
 
-Vector native_vector(const luacs::Vector3& value) {
+Vector complete_native_vector(const luacs::Vector3& value) {
     return Vector(value.x, value.y, value.z);
 }
 
@@ -54,8 +56,6 @@ public:
         }
         return true;
     }
-
-    std::size_t ignored_count() const { return ignored_count_; }
 
 private:
     std::array<std::uint32_t, luacs::kTraceIgnoreCapacity> ignored_{};
@@ -91,7 +91,7 @@ bool build_native_ray(const TraceRequest& request, Ray_t& ray,
                             "line trace start offset must be finite");
                 return false;
             }
-            ray.Init(native_vector(request.center_a));
+            ray.Init(complete_native_vector(request.center_a));
             return true;
 
         case TraceShape::Sphere:
@@ -101,7 +101,7 @@ bool build_native_ray(const TraceRequest& request, Ray_t& ray,
                             "sphere trace requires a finite center and radius greater than zero");
                 return false;
             }
-            ray.Init(native_vector(request.center_a), request.radius);
+            ray.Init(complete_native_vector(request.center_a), request.radius);
             return ray.m_eType == RAY_TYPE_SPHERE;
 
         case TraceShape::Hull:
@@ -113,7 +113,8 @@ bool build_native_ray(const TraceRequest& request, Ray_t& ray,
                             "hull trace requires finite ordered non-degenerate bounds");
                 return false;
             }
-            ray.Init(native_vector(request.mins), native_vector(request.maxs));
+            ray.Init(complete_native_vector(request.mins),
+                     complete_native_vector(request.maxs));
             return ray.m_eType == RAY_TYPE_HULL;
 
         case TraceShape::Capsule:
@@ -125,8 +126,8 @@ bool build_native_ray(const TraceRequest& request, Ray_t& ray,
                             "capsule trace requires two different finite centers and a radius greater than zero");
                 return false;
             }
-            ray.Init(native_vector(request.center_a),
-                     native_vector(request.center_b), request.radius);
+            ray.Init(complete_native_vector(request.center_a),
+                     complete_native_vector(request.center_b), request.radius);
             return ray.m_eType == RAY_TYPE_CAPSULE;
 
         case TraceShape::Mesh:
@@ -153,9 +154,10 @@ bool build_native_ray(const TraceRequest& request, Ray_t& ray,
                     return false;
                 }
                 mesh_vertices[index] =
-                    native_vector(request.mesh_vertices[index]);
+                    complete_native_vector(request.mesh_vertices[index]);
             }
-            ray.Init(native_vector(request.mins), native_vector(request.maxs),
+            ray.Init(complete_native_vector(request.mins),
+                     complete_native_vector(request.maxs),
                      mesh_vertices.data(),
                      static_cast<int>(request.mesh_vertex_count));
             return ray.m_eType == RAY_TYPE_MESH;
@@ -267,8 +269,8 @@ bool trace_complete(void* context, const TraceRequest* request,
         return false;
     }
 
-    const Vector start = native_vector(normalized.start);
-    const Vector end = native_vector(normalized.end);
+    const Vector start = complete_native_vector(normalized.start);
+    const Vector end = complete_native_vector(normalized.end);
     CGameTrace native;
     if (!api->trace_shape_(
             api->trace_manager_,
@@ -930,8 +932,8 @@ bool grenade_remove_complete(void* context, int entity_index, char* error,
     return true;
 }
 
-struct AdvancedWorldV3Registration {
-    AdvancedWorldV3Registration() {
+struct CompleteAdvancedWorldRegistration {
+    CompleteAdvancedWorldRegistration() {
         auto& services = g_advanced_api.services;
         services.abi_version = luacs::kAdvancedWorldServicesAbiVersion;
         services.trace = &trace_complete;
@@ -944,6 +946,6 @@ struct AdvancedWorldV3Registration {
     }
 };
 
-AdvancedWorldV3Registration g_advanced_world_v3_registration;
+CompleteAdvancedWorldRegistration g_complete_advanced_world_registration;
 
 } // namespace
