@@ -32,6 +32,20 @@ struct PlayerSnapshot {
     bool active{false};
 };
 
+struct HostOperations {
+    std::function<bool(int slot, int destination, std::string_view message,
+                       std::string& error)> hud_print;
+    std::function<bool(std::string_view name)> cvar_exists;
+    std::function<bool(std::string_view name, std::string& value,
+                       std::string& error)> cvar_get;
+    std::function<bool(std::string_view name, std::string_view value,
+                       std::string& error)> cvar_set;
+    std::function<bool(int slot, std::string_view class_name,
+                       std::string& error)> weapon_give;
+    std::function<bool(int slot, std::string& error)> weapon_remove_all;
+    std::function<bool(int slot, std::string& error)> weapon_drop_active;
+};
+
 class Runtime {
 public:
     using ConsoleWriter = std::function<void(std::string_view)>;
@@ -44,7 +58,8 @@ public:
     Runtime& operator=(const Runtime&) = delete;
 
     bool initialize(std::filesystem::path root, ConsoleWriter console_writer,
-                    ServerCommand server_command, std::string& error);
+                    ServerCommand server_command, HostOperations host_operations,
+                    std::string& error);
     void shutdown();
     void load_plugins();
     void tick();
@@ -99,6 +114,7 @@ private:
     std::array<std::uint8_t, 32> key_{};
     ConsoleWriter console_writer_;
     ServerCommand server_command_;
+    HostOperations host_operations_;
     std::chrono::steady_clock::time_point started_{};
     std::vector<std::unique_ptr<ScriptVm>> scripts_;
     std::unordered_map<lua_State*, ScriptVm*> state_map_;
@@ -132,6 +148,21 @@ private:
     static bool service_player_at(void* context, std::size_t index, PlayerInfo* output);
     static bool service_command_on(void* context, lua_State* state, const char* command_name,
                                    int callback_index);
+    static bool service_hud_print(void* context, int slot, int destination,
+                                  const char* message, char* error,
+                                  std::size_t error_size);
+    static bool service_cvar_exists(void* context, const char* name);
+    static bool service_cvar_get(void* context, const char* name, char* output,
+                                 std::size_t output_size, char* error,
+                                 std::size_t error_size);
+    static bool service_cvar_set(void* context, const char* name, const char* value,
+                                 char* error, std::size_t error_size);
+    static bool service_weapon_give(void* context, int slot, const char* class_name,
+                                    char* error, std::size_t error_size);
+    static bool service_weapon_remove_all(void* context, int slot, char* error,
+                                          std::size_t error_size);
+    static bool service_weapon_drop_active(void* context, int slot, char* error,
+                                           std::size_t error_size);
 
     static int lua_print(lua_State* state);
     static int lua_vector(lua_State* state);
