@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef INTERFACEVERSION_GAMEEVENTSMANAGER2
+#define INTERFACEVERSION_GAMEEVENTSMANAGER2 "GAMEEVENTSMANAGER002"
+#endif
+
 #include "game_api.h"
 #include "runtime.h"
 
