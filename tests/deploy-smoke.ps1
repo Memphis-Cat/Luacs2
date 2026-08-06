@@ -18,17 +18,37 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
+function Invoke-NativeCaptured {
+    param([Parameter(Mandatory = $true)][scriptblock]$Command)
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = & $Command 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+
+    [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = ($lines | Out-String)
+    }
+}
+
 function Invoke-ExternalPowerShell {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    $output = (& powershell -NoProfile -ExecutionPolicy Bypass @Arguments 2>&1 |
-        Out-String)
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+    Invoke-NativeCaptured {
+        & powershell -NoProfile -ExecutionPolicy Bypass @Arguments
+    }
 }
 
 function Invoke-Deploy {
     param([Parameter(Mandatory = $true)][string]$GameRoot)
-    $output = (& $deploy $GameRoot 2>&1 | Out-String)
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+    Invoke-NativeCaptured {
+        & $deploy $GameRoot
+    }
 }
 
 function New-FakeServer {
