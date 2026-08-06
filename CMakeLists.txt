@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-add_compile_options(/utf-8 /MP)
+add_compile_options(/utf-8 /MP /WX)
 add_compile_definitions(
     NOMINMAX
     COMPILER_MSVC
