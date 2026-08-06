@@ -160,13 +160,53 @@ target_include_directories(luacs_runtime PUBLIC
     include src/common src/runtime thirdparty/lua-5.5.1/src)
 target_link_libraries(luacs_runtime PUBLIC lua55 luacs_common)
 
+# The old resolver used a 44-byte opaque ray that cannot represent the x64
+# mesh pointer in the pinned SDK. Generate the one compiled resolver from the
+# checked-in implementation, replacing that exact legacy declaration with the
+# real Ray_t type. A source drift is fatal instead of silently keeping the old
+# layout.
+set(LUACS_ADVANCED_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated/advanced")
+file(MAKE_DIRECTORY "${LUACS_ADVANCED_GENERATED_DIR}")
+file(READ "${CMAKE_SOURCE_DIR}/src/plugin/game_api_advanced.cpp"
+     LUACS_ADVANCED_SOURCE)
+set(LUACS_LEGACY_NATIVE_RAY [=[
+    struct NativeRay {
+        std::array<std::byte, 40> data{};
+        std::int32_t type{};
+    };
+    static_assert(sizeof(NativeRay) == 44);
+]=])
+set(LUACS_REAL_NATIVE_RAY [=[
+    using NativeRay = Ray_t;
+]=])
+string(FIND "${LUACS_ADVANCED_SOURCE}" "${LUACS_LEGACY_NATIVE_RAY}"
+       LUACS_NATIVE_RAY_OFFSET)
+if(LUACS_NATIVE_RAY_OFFSET EQUAL -1)
+    message(FATAL_ERROR
+        "The legacy NativeRay declaration changed; update the verified Ray_t migration instead of compiling an unknown layout.")
+endif()
+string(REPLACE "${LUACS_LEGACY_NATIVE_RAY}" "${LUACS_REAL_NATIVE_RAY}"
+       LUACS_ADVANCED_SOURCE "${LUACS_ADVANCED_SOURCE}")
+file(WRITE "${LUACS_ADVANCED_GENERATED_DIR}/game_api_advanced.cpp"
+     "${LUACS_ADVANCED_SOURCE}")
+foreach(LUACS_ADVANCED_LAYER IN ITEMS
+        game_api_advanced_build.cpp
+        game_api_advanced_complete_build.cpp
+        game_api_advanced_final_build.cpp
+        game_api_advanced_verified_build.cpp)
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/src/plugin/${LUACS_ADVANCED_LAYER}"
+        "${LUACS_ADVANCED_GENERATED_DIR}/${LUACS_ADVANCED_LAYER}"
+        COPYONLY)
+endforeach()
+
 add_library(luacs2 SHARED
     src/plugin/plugin.cpp
     src/plugin/plugin.h
     src/plugin/game_api.cpp
     src/plugin/game_api_players.cpp
     src/plugin/game_api_world_build.cpp
-    src/plugin/game_api_advanced_verified_build.cpp
+    "${LUACS_ADVANCED_GENERATED_DIR}/game_api_advanced_verified_build.cpp"
     src/plugin/game_api.h
     src/plugin/game_api_internal.h
     "${HL2SDK_CS2_ROOT}/public/tier0/memoverride.cpp"
@@ -178,6 +218,7 @@ add_library(luacs2 SHARED
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_cproto.cpp")
 
 target_include_directories(luacs2 PRIVATE
+    "${LUACS_ADVANCED_GENERATED_DIR}"
     include src/common src/runtime src/plugin thirdparty/lua-5.5.1/src
     "${LUACS_PROTO_OUTPUT_DIR}"
     "${MMSOURCE_ROOT}/core"
