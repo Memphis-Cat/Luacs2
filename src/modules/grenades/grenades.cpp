@@ -5,23 +5,22 @@ extern "C" {
 #include "lauxlib.h"
 }
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 
 namespace {
 using luacs::AdvancedWorldServices;
 using luacs::GrenadeInfo;
 using luacs::GrenadeSpawnRequest;
 using luacs::GrenadeType;
+using luacs::PropertyKind;
+using luacs::PropertyValue;
 using luacs::Services;
 using luacs::Vector3;
 
 inline constexpr const char* kGrenadeMeta = "LuaCS.Grenade";
-
-const Services* services(lua_State* state) {
-    return static_cast<const Services*>(
-        lua_touserdata(state, lua_upvalueindex(1)));
-}
 
 const AdvancedWorldServices* advanced() {
     return luacs::resolve_advanced_world_services();
@@ -80,12 +79,111 @@ const char* type_name(GrenadeType type) {
         case GrenadeType::Molotov: return "molotov";
         case GrenadeType::Incendiary: return "incendiary";
         case GrenadeType::Decoy: return "decoy";
+        case GrenadeType::Inferno: return "inferno";
         default: return "unknown";
     }
 }
 
+bool property(const AdvancedWorldServices* api, int entity,
+              const char* path, PropertyValue& output) {
+    if (!api || !api->property_get) return false;
+    char error[256]{};
+    return api->property_get(api->context, entity, path, -1, &output, error,
+                             sizeof(error));
+}
+
+bool first_property(const AdvancedWorldServices* api, int entity,
+                    std::initializer_list<const char*> paths,
+                    PropertyValue& output) {
+    for (const char* path : paths) {
+        if (property(api, entity, path, output)) return true;
+    }
+    return false;
+}
+
+int integer_value(const PropertyValue& value, int fallback = 0) {
+    switch (value.kind) {
+        case PropertyKind::SignedInteger:
+            return static_cast<int>(value.signed_value);
+        case PropertyKind::UnsignedInteger:
+        case PropertyKind::Pointer:
+            return static_cast<int>(value.unsigned_value);
+        case PropertyKind::EntityHandle:
+            return value.entity_index;
+        case PropertyKind::Float:
+            return static_cast<int>(value.float_value);
+        default:
+            return fallback;
+    }
+}
+
+float float_value(const PropertyValue& value, float fallback = 0.0f) {
+    switch (value.kind) {
+        case PropertyKind::Float:
+            return static_cast<float>(value.float_value);
+        case PropertyKind::SignedInteger:
+            return static_cast<float>(value.signed_value);
+        case PropertyKind::UnsignedInteger:
+            return static_cast<float>(value.unsigned_value);
+        default:
+            return fallback;
+    }
+}
+
+bool boolean_value(const PropertyValue& value, bool fallback = false) {
+    switch (value.kind) {
+        case PropertyKind::Boolean:
+            return value.boolean_value;
+        case PropertyKind::SignedInteger:
+            return value.signed_value != 0;
+        case PropertyKind::UnsignedInteger:
+            return value.unsigned_value != 0;
+        default:
+            return fallback;
+    }
+}
+
+void enrich_grenade(const AdvancedWorldServices* api, GrenadeInfo& value) {
+    if (!value.valid || value.entity_index < 0) return;
+
+    PropertyValue property_value;
+    if (first_property(api, value.entity_index,
+                       {"m_hThrower", "m_hOriginalThrower"},
+                       property_value)) {
+        value.thrower_entity_index = integer_value(property_value, -1);
+    }
+    if (first_property(api, value.entity_index,
+                       {"m_iTeamNum", "m_iInitialTeamNum"}, property_value)) {
+        value.team = integer_value(property_value);
+    }
+    if (first_property(api, value.entity_index,
+                       {"m_nBounces", "m_nBounceCount"}, property_value)) {
+        value.bounce_count = integer_value(property_value);
+    }
+    if (first_property(api, value.entity_index,
+                       {"m_nFireCount", "m_fireCount"}, property_value)) {
+        value.fire_count = integer_value(property_value);
+    }
+    if (first_property(api, value.entity_index,
+                       {"m_flLifetime", "m_flLifeTime"}, property_value)) {
+        value.lifetime = float_value(property_value);
+    } else if (value.spawn_time > 0.0f && value.detonate_time >= value.spawn_time) {
+        value.lifetime = value.detonate_time - value.spawn_time;
+    }
+    if (first_property(api, value.entity_index,
+                       {"m_nSmokeEffectTickBegin", "m_nSmokeEffectTick"},
+                       property_value)) {
+        value.smoke_effect_tick = float_value(property_value);
+    }
+    if (first_property(api, value.entity_index,
+                       {"m_bBounceSound", "m_bHasBounceSound"},
+                       property_value)) {
+        value.bounce_sound = boolean_value(property_value);
+    }
+}
+
 void push_grenade(lua_State* state, const GrenadeInfo& value) {
-    lua_createtable(state, 0, 18);
+    lua_createtable(state, 0, 28);
 #define SET_BOOL(name)                                                         \
     lua_pushboolean(state, value.name);                                        \
     lua_setfield(state, -2, #name)
@@ -98,13 +196,20 @@ void push_grenade(lua_State* state, const GrenadeInfo& value) {
     SET_BOOL(valid);
     SET_BOOL(exploded);
     SET_BOOL(smoke_active);
+    SET_BOOL(bounce_sound);
     SET_INT(entity_index);
     lua_pushinteger(state, value.handle);
     lua_setfield(state, -2, "handle");
     SET_INT(owner_entity_index);
     SET_INT(thrower_slot);
+    SET_INT(thrower_entity_index);
+    SET_INT(team);
+    SET_INT(bounce_count);
+    SET_INT(fire_count);
     SET_NUM(spawn_time);
     SET_NUM(detonate_time);
+    SET_NUM(lifetime);
+    SET_NUM(smoke_effect_tick);
 #undef SET_NUM
 #undef SET_INT
 #undef SET_BOOL
@@ -131,6 +236,7 @@ int get(lua_State* state) {
                           error, sizeof(error))) {
         return fail(state, error[0] ? error : "grenade query service is unavailable");
     }
+    enrich_grenade(api, value);
     push_grenade(state, value);
     return 1;
 }
@@ -155,6 +261,7 @@ int list(lua_State* state) {
                              sizeof(error))) {
             return fail(state, error);
         }
+        enrich_grenade(api, value);
         push_grenade(state, value);
         lua_seti(state, -2, static_cast<lua_Integer>(index + 1));
     }
@@ -197,6 +304,7 @@ int spawn(lua_State* state) {
                             sizeof(error))) {
         return fail(state, error[0] ? error : "grenade spawn service is unavailable");
     }
+    enrich_grenade(api, output);
     push_grenade(state, output);
     return 1;
 }
@@ -256,7 +364,7 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     }
     lua_pop(state, 1);
 
-    lua_createtable(state, 0, 20);
+    lua_createtable(state, 0, 24);
     add_function(state, api, "get", &get);
     add_function(state, api, "list", &list);
     add_function(state, api, "all", &list);
@@ -271,5 +379,6 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     add_constant(state, "MOLOTOV", GrenadeType::Molotov);
     add_constant(state, "INCENDIARY", GrenadeType::Incendiary);
     add_constant(state, "DECOY", GrenadeType::Decoy);
+    add_constant(state, "INFERNO", GrenadeType::Inferno);
     return 1;
 }
