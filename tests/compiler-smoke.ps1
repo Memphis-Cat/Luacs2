@@ -12,8 +12,10 @@ $badSource = Join-Path $luaCs "scripting\syntax_failure.lua"
 $badOutput = Join-Path $luaCs "plugins\syntax_failure.smg"
 $vdf = Join-Path $addons "metamod\luacs2.vdf"
 $advancedGamedata = Join-Path $luaCs "gamedata\reference\advanced_windows_gamedata.json"
+$cmakeFile = Join-Path $root "CMakeLists.txt"
 $advancedHeader = Join-Path $root "include\luacs\advanced_world_api.h"
 $advancedAdapter = Join-Path $root "src\plugin\game_api_advanced_build.cpp"
+$advancedComplete = Join-Path $root "src\plugin\game_api_advanced_complete_build.cpp"
 $propertiesSource = Join-Path $root "src\modules\properties\properties.cpp"
 $tracesSource = Join-Path $root "src\modules\traces\traces.cpp"
 $grenadesSource = Join-Path $root "src\modules\grenades\grenades.cpp"
@@ -62,6 +64,10 @@ try {
         }
     }
 
+    Assert-SourceTokens $cmakeFile @(
+        "src/plugin/game_api_advanced_complete_build.cpp",
+        "add_luacs_module(traces src/modules/traces/traces.cpp)"
+    )
     Assert-SourceTokens $advancedHeader @(
         "kAdvancedWorldServicesAbiVersion = 3",
         "Mesh = 4",
@@ -72,14 +78,24 @@ try {
         "property_collection_resize"
     )
     Assert-SourceTokens $advancedAdapter @(
-        "#include <ray.h>",
-        "Ray_t ray",
+        "property_get_raw_v2",
+        "property_set_raw_v2",
+        "property_collection_resize_v2",
+        "property_child_at_v2",
+        "services.property_get_raw",
+        "services.property_child_at"
+    )
+    Assert-SourceTokens $advancedComplete @(
+        '#include "game_api_advanced_build.cpp"',
+        "class CompleteTraceFilter",
+        "build_native_ray",
         "TraceShape::Sphere",
         "TraceShape::Capsule",
         "TraceShape::Mesh",
-        "m_ShapeAttributes",
-        "property_get_raw_v2",
-        "property_collection_resize_v2"
+        "trace_complete",
+        "grenade_spawn_complete",
+        "services.trace = &trace_complete",
+        "services.grenade_spawn = &grenade_spawn_complete"
     )
     Assert-SourceTokens $propertiesSource @(
         '"get_raw"',
@@ -163,7 +179,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, ABI v3 surface, and compiler smoke tests passed."
+    Write-Host "LuaCS package, compiled ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
