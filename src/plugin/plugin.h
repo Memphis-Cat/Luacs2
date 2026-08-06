@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game_api.h"
 #include "runtime.h"
 
 #include <ISmmPlugin.h>
@@ -29,11 +30,12 @@ public:
     const char* GetDescription() override { return "Modular Lua 5.5 runtime for CS2 Metamod"; }
     const char* GetURL() override { return "https://github.com/Memphis-Cat/Luacs2"; }
     const char* GetLicense() override { return "MIT"; }
-    const char* GetVersion() override { return "0.1.1-runtime-fix"; }
+    const char* GetVersion() override { return "0.2.0-weapons-hud-cvars"; }
     const char* GetDate() override { return __DATE__; }
     const char* GetLogTag() override { return "LUACS"; }
 
 private:
+    LuaCSGameApi game_api_;
     luacs::Runtime runtime_;
 };
 
