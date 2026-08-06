@@ -22,6 +22,8 @@ extern "C" {
 
 namespace luacs {
 
+inline constexpr std::string_view kLuaCSVersion = "0.5.0";
+
 struct PlayerSnapshot {
     int slot{-1};
     std::string name;
@@ -132,10 +134,20 @@ private:
         bool cancelled{};
     };
 
+    struct PluginMetadata {
+        std::string name;
+        std::string author;
+        std::string version;
+        std::string description;
+    };
+
     struct ScriptVm {
         Runtime* runtime{};
         std::filesystem::path source_path;
         std::string name;
+        std::string author;
+        std::string version;
+        std::string description;
         lua_State* state{};
         std::filesystem::path log_path;
         std::unordered_map<std::string, std::vector<EventCallback>> events;
@@ -160,11 +172,14 @@ private:
     std::vector<std::unique_ptr<ScriptVm>> scripts_;
     std::unordered_map<lua_State*, ScriptVm*> state_map_;
     std::unordered_map<int, PlayerSnapshot> players_;
+    std::unordered_map<std::string, PluginMetadata> plugin_metadata_cache_;
+    std::unordered_map<std::string, std::string> plugin_failures_;
     std::uint64_t next_timer_id_{1};
     std::uint64_t next_event_subscription_id_{1};
     Services services_{};
 
     bool load_plugin(const std::filesystem::path& path);
+    void read_plugin_metadata(ScriptVm& vm);
     void emit(std::string_view event_name,
               const std::function<void(lua_State*)>& push_event_table);
     void emit_player(std::string_view event_name, const PlayerSnapshot& player);
