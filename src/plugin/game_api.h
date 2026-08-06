@@ -2,6 +2,7 @@
 
 #include "runtime.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -29,12 +30,11 @@ public:
 
     IGameEventManager2* event_manager() const;
     void set_event_manager(IGameEventManager2* manager);
+    void* event_manager_vtable() const;
 
     std::uint64_t begin_event(IGameEvent* event, bool post,
                               bool dont_broadcast);
     LuaCSEventDecision end_event(std::uint64_t token);
-
-    void* game_event_manager_init_address() const;
 
 private:
     std::unique_ptr<LuaCSGameApiImpl> impl_;
