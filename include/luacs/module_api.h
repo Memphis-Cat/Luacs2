@@ -15,8 +15,10 @@ extern "C" {
 
 namespace luacs {
 
-inline constexpr std::uint32_t kModuleAbiVersion = 3;
+inline constexpr std::uint32_t kModuleAbiVersion = 4;
 inline constexpr std::size_t kClassnameCapacity = 128;
+
+struct WorldServices;
 
 struct Vector3 {
     float x{0.0f};
@@ -218,6 +220,8 @@ struct Services {
     bool (*weapon_set_ammo)(void* context, int slot, int ammo_type,
                             int value, char* error,
                             std::size_t error_size){nullptr};
+
+    const WorldServices* world{nullptr};
 };
 
 using OpenModuleFn = int (*)(lua_State* state, const Services* services);
