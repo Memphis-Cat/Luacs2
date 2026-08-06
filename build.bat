@@ -55,6 +55,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\generate-disk-backed-
   -Destination "build\generated\plugin\game_api.cpp" || exit /b 1
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\inject-signature-diagnostics.ps1" ^
   -Path "build\generated\plugin\game_api.cpp" || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\generate-server-module-plugin.ps1" ^
+  -Source "src\plugin\plugin.cpp" ^
+  -Destination "build\generated\plugin\plugin.cpp" || exit /b 1
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
   -DCMAKE_PROJECT_INCLUDE="%CD%\tools\inject-generated-game-api.cmake" ^
