@@ -260,13 +260,15 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
     fire_event_post_hook_id_ = SH_ADD_HOOK(
         IGameEventManager2, FireEvent, g_game_events,
         SH_MEMBER(this, &LuaCSPlugin::Hook_FireEventPost), true);
-    if (fire_event_pre_hook_id_ < 0 || fire_event_post_hook_id_ < 0) {
-        if (fire_event_pre_hook_id_ >= 0) {
+    if (fire_event_pre_hook_id_ <= 0 || fire_event_post_hook_id_ <= 0) {
+        if (fire_event_pre_hook_id_ > 0) {
             SH_REMOVE_HOOK_ID(fire_event_pre_hook_id_);
         }
-        if (fire_event_post_hook_id_ >= 0) {
+        if (fire_event_post_hook_id_ > 0) {
             SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
         }
+        fire_event_pre_hook_id_ = -1;
+        fire_event_post_hook_id_ = -1;
         unregister_lua_command();
         g_runtime = nullptr;
         runtime_.shutdown();
@@ -311,11 +313,11 @@ bool LuaCSPlugin::Unload(char*, size_t) {
                    SH_MEMBER(this, &LuaCSPlugin::Hook_OnClientConnected), false);
     SH_REMOVE_HOOK(IServerGameClients, ClientCommand, g_game_clients,
                    SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
-    if (fire_event_pre_hook_id_ >= 0) {
+    if (fire_event_pre_hook_id_ > 0) {
         SH_REMOVE_HOOK_ID(fire_event_pre_hook_id_);
         fire_event_pre_hook_id_ = -1;
     }
-    if (fire_event_post_hook_id_ >= 0) {
+    if (fire_event_post_hook_id_ > 0) {
         SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
         fire_event_post_hook_id_ = -1;
     }
