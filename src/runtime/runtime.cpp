@@ -7,8 +7,8 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <fstream>
 #include <ctime>
+#include <fstream>
 #include <iomanip>
 #include <regex>
 #include <sstream>
@@ -18,7 +18,8 @@ using namespace detail;
 
 namespace {
 
-std::filesystem::path make_core_log_path(const std::filesystem::path& logs_dir) {
+std::filesystem::path make_core_log_path(
+    const std::filesystem::path& logs_dir) {
     const auto time_value =
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm local{};
@@ -29,8 +30,8 @@ std::filesystem::path make_core_log_path(const std::filesystem::path& logs_dir) 
     return logs_dir / name.str();
 }
 
-std::optional<std::uint64_t> read_json_number(const std::filesystem::path& path,
-                                              std::string_view field) {
+std::optional<std::uint64_t> read_json_number(
+    const std::filesystem::path& path, std::string_view field) {
     std::ifstream input(path, std::ios::binary);
     if (!input) return std::nullopt;
 
@@ -51,14 +52,16 @@ std::optional<std::uint64_t> read_json_number(const std::filesystem::path& path,
     }
 }
 
-std::size_t count_files_with_extension(const std::filesystem::path& directory,
-                                       std::string_view extension) {
+std::size_t count_files_with_extension(
+    const std::filesystem::path& directory, std::string_view extension) {
     std::error_code error;
     if (!std::filesystem::exists(directory, error)) return 0;
 
     std::size_t count = 0;
     for (std::filesystem::recursive_directory_iterator iterator(
-             directory, std::filesystem::directory_options::skip_permission_denied, error),
+             directory,
+             std::filesystem::directory_options::skip_permission_denied,
+             error),
          end;
          iterator != end && !error; iterator.increment(error)) {
         if (iterator->is_regular_file(error) &&
@@ -69,14 +72,19 @@ std::size_t count_files_with_extension(const std::filesystem::path& directory,
     return count;
 }
 
-std::size_t count_native_modules(const std::filesystem::path& directory) {
+std::size_t count_native_modules(
+    const std::filesystem::path& directory) {
     std::error_code error;
     if (!std::filesystem::exists(directory, error)) return 0;
 
     std::size_t count = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
+    for (const auto& entry :
+         std::filesystem::directory_iterator(directory, error)) {
         if (error) break;
-        if (!entry.is_regular_file(error) || entry.path().extension() != ".dll") continue;
+        if (!entry.is_regular_file(error) ||
+            entry.path().extension() != ".dll") {
+            continue;
+        }
         const auto name = entry.path().stem().string();
         if (name != "luacs2" && name != "lua55") ++count;
     }
@@ -95,7 +103,8 @@ Runtime::ScriptVm::~ScriptVm() {
 Runtime::Runtime() = default;
 Runtime::~Runtime() { shutdown(); }
 
-bool Runtime::initialize(std::filesystem::path root, ConsoleWriter console_writer,
+bool Runtime::initialize(std::filesystem::path root,
+                         ConsoleWriter console_writer,
                          ServerCommand server_command, std::string& error) {
     shutdown();
     root_ = std::move(root);
@@ -114,17 +123,20 @@ bool Runtime::initialize(std::filesystem::path root, ConsoleWriter console_write
     std::error_code filesystem_error;
     std::filesystem::create_directories(plugins_dir_, filesystem_error);
     if (filesystem_error) {
-        error = "Could not create plugins directory: " + filesystem_error.message();
+        error = "Could not create plugins directory: " +
+                filesystem_error.message();
         return false;
     }
     std::filesystem::create_directories(config_dir_, filesystem_error);
     if (filesystem_error) {
-        error = "Could not create config directory: " + filesystem_error.message();
+        error = "Could not create config directory: " +
+                filesystem_error.message();
         return false;
     }
     std::filesystem::create_directories(logs_dir_, filesystem_error);
     if (filesystem_error) {
-        error = "Could not create logs directory: " + filesystem_error.message();
+        error = "Could not create logs directory: " +
+                filesystem_error.message();
         return false;
     }
 
@@ -132,7 +144,8 @@ bool Runtime::initialize(std::filesystem::path root, ConsoleWriter console_write
     {
         std::ofstream create_log(core_log_path_, std::ios::app);
         if (!create_log) {
-            error = "Could not create core log file: " + core_log_path_.string();
+            error = "Could not create core log file: " +
+                    core_log_path_.string();
             return false;
         }
     }
@@ -144,15 +157,20 @@ bool Runtime::initialize(std::filesystem::path root, ConsoleWriter console_write
 
     const auto reference_dir = root_ / "gamedata" / "reference";
     const auto summary_path = reference_dir / "PACK_SUMMARY.json";
-    const auto official_path = reference_dir / "official_windows_gamedata.json";
-    const auto official_entries = read_json_number(summary_path, "official_entries");
+    const auto official_path =
+        reference_dir / "official_windows_gamedata.json";
+    const auto official_entries =
+        read_json_number(summary_path, "official_entries");
     const auto windows_entries =
         read_json_number(summary_path, "windows_only_ready_made_entries");
-    const auto json_files = count_files_with_extension(reference_dir, ".json");
+    const auto json_files =
+        count_files_with_extension(reference_dir, ".json");
 
     if (official_entries && std::filesystem::exists(official_path)) {
-        log_runtime("Successfully indexed " + std::to_string(*official_entries) +
-                    " official game data entries from " + official_path.string());
+        log_runtime("Successfully indexed " +
+                    std::to_string(*official_entries) +
+                    " official game data entries from " +
+                    official_path.string());
     } else {
         log_runtime("[WARN] Official game data summary was not available at " +
                     summary_path.string());
@@ -160,24 +178,27 @@ bool Runtime::initialize(std::filesystem::path root, ConsoleWriter console_write
     if (windows_entries) {
         log_runtime("Game data/reference pack contains " +
                     std::to_string(*windows_entries) +
-                    " Windows-ready entries across " + std::to_string(json_files) +
-                    " JSON files.");
+                    " Windows-ready entries across " +
+                    std::to_string(json_files) + " JSON files.");
     } else {
         log_runtime("Found " + std::to_string(json_files) +
                     " game data/reference JSON files.");
     }
 
     if (!std::filesystem::exists(bin_dir_)) {
-        error = "Native module directory was not found: " + bin_dir_.string();
+        error = "Native module directory was not found: " +
+                bin_dir_.string();
         log_runtime("[ERROR] " + error);
         return false;
     }
-    log_runtime("Discovered " + std::to_string(count_native_modules(bin_dir_)) +
+    log_runtime("Discovered " +
+                std::to_string(count_native_modules(bin_dir_)) +
                 " optional native API modules.");
 
     bool has_compiled_plugins = false;
     std::size_t compiled_plugin_count = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(plugins_dir_)) {
+    for (const auto& entry :
+         std::filesystem::directory_iterator(plugins_dir_)) {
         if (entry.is_regular_file() && entry.path().extension() == ".smg") {
             has_compiled_plugins = true;
             ++compiled_plugin_count;
@@ -186,7 +207,8 @@ bool Runtime::initialize(std::filesystem::path root, ConsoleWriter console_write
 
     const auto key_path = config_dir_ / "luacs.key";
     const bool key_existed = std::filesystem::exists(key_path);
-    if (!smg::load_or_create_key(key_path, !has_compiled_plugins, key_, error)) {
+    if (!smg::load_or_create_key(key_path, !has_compiled_plugins, key_,
+                                 error)) {
         log_runtime("[ERROR] " + error);
         return false;
     }
@@ -195,11 +217,11 @@ bool Runtime::initialize(std::filesystem::path root, ConsoleWriter console_write
     log_runtime("Found " + std::to_string(compiled_plugin_count) +
                 " compiled Lua plugin(s) in " + plugins_dir_.string());
 
+    services_ = {};
     services_.abi_version = kModuleAbiVersion;
     services_.context = this;
     services_.log = &Runtime::service_log;
     services_.now = &Runtime::service_now;
-    services_.event_on = &Runtime::service_event_on;
     services_.timer_add = &Runtime::service_timer_add;
     services_.timer_cancel = &Runtime::service_timer_cancel;
     services_.player_get = &Runtime::service_player_get;
@@ -207,7 +229,8 @@ bool Runtime::initialize(std::filesystem::path root, ConsoleWriter console_write
     services_.player_at = &Runtime::service_player_at;
     services_.command_on = &Runtime::service_command_on;
 
-    log_runtime("Lua 5.5 runtime services initialized.");
+    log_runtime("Lua 5.5 runtime services initialized with ABI v" +
+                std::to_string(kModuleAbiVersion) + ".");
     return true;
 }
 
@@ -217,6 +240,9 @@ void Runtime::shutdown() {
     scripts_.clear();
     players_.clear();
     next_timer_id_ = 1;
+    next_event_subscription_id_ = 1;
+    host_operations_ = {};
+    services_ = {};
     root_.clear();
     bin_dir_.clear();
     plugins_dir_.clear();
@@ -229,12 +255,14 @@ void Runtime::shutdown() {
 
 void Runtime::load_plugins() {
     if (!std::filesystem::exists(plugins_dir_)) {
-        log_runtime("[WARN] Plugins directory does not exist: " + plugins_dir_.string());
+        log_runtime("[WARN] Plugins directory does not exist: " +
+                    plugins_dir_.string());
         return;
     }
 
     std::vector<std::filesystem::path> paths;
-    for (const auto& entry : std::filesystem::directory_iterator(plugins_dir_)) {
+    for (const auto& entry :
+         std::filesystem::directory_iterator(plugins_dir_)) {
         if (entry.is_regular_file() && entry.path().extension() == ".smg") {
             paths.push_back(entry.path());
         }
@@ -246,14 +274,17 @@ void Runtime::load_plugins() {
     const auto loaded = scripts_.size() - before;
 
     if (paths.empty()) {
-        log_runtime("[WARN] No compiled .smg plugins were found. Run scripting\\compile.exe.");
+        log_runtime(
+            "[WARN] No compiled .smg plugins were found. Run "
+            "scripting\\compile.exe.");
     } else if (loaded == paths.size()) {
         log_runtime("Successfully loaded all " + std::to_string(loaded) +
                     " compiled Lua plugin(s).");
     } else {
         log_runtime("[WARN] Loaded " + std::to_string(loaded) + " of " +
                     std::to_string(paths.size()) +
-                    " compiled Lua plugin(s). Check the log above for errors.");
+                    " compiled Lua plugin(s). Check the log above for "
+                    "errors.");
     }
 }
 
@@ -261,7 +292,8 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
     smg::Package package;
     std::string error;
     if (!smg::read(path, key_, package, error)) {
-        log_runtime("[ERROR] Could not load " + path.filename().string() + ": " + error);
+        log_runtime("[ERROR] Could not load " + path.filename().string() +
+                    ": " + error);
         return false;
     }
 
@@ -279,7 +311,8 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
     {
         std::ofstream create_plugin_log(vm->log_path, std::ios::app);
         if (!create_plugin_log) {
-            log_runtime("[ERROR] Could not create plugin log " + vm->log_path.string());
+            log_runtime("[ERROR] Could not create plugin log " +
+                        vm->log_path.string());
             return false;
         }
     }
@@ -292,9 +325,10 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
         return false;
     }
 
-    const int status = luaL_loadbufferx(vm->state,
-                                       reinterpret_cast<const char*>(package.bytecode.data()),
-                                       package.bytecode.size(), vm->name.c_str(), "b");
+    const int status = luaL_loadbufferx(
+        vm->state,
+        reinterpret_cast<const char*>(package.bytecode.data()),
+        package.bytecode.size(), vm->name.c_str(), "b");
     if (status != LUA_OK) {
         const char* message = lua_tostring(vm->state, -1);
         log(*vm, std::string("[ERROR] Bytecode load failed: ") +
@@ -319,20 +353,25 @@ void Runtime::tick() {
         std::vector<std::uint64_t> due_ids;
         due_ids.reserve(vm.timers.size());
         for (const auto& timer : vm.timers) {
-            if (!timer.cancelled && timer.due <= current) due_ids.push_back(timer.id);
+            if (!timer.cancelled && timer.due <= current) {
+                due_ids.push_back(timer.id);
+            }
         }
 
         for (const std::uint64_t id : due_ids) {
-            auto found = std::find_if(vm.timers.begin(), vm.timers.end(),
-                                      [id](const Timer& timer) { return timer.id == id; });
+            auto found = std::find_if(
+                vm.timers.begin(), vm.timers.end(),
+                [id](const Timer& timer) { return timer.id == id; });
             if (found == vm.timers.end() || found->cancelled) continue;
 
             const int reference = found->reference;
             lua_rawgeti(vm.state, LUA_REGISTRYINDEX, reference);
-            const bool succeeded = protected_call(vm, 0, 0, "timer callback");
+            const bool succeeded =
+                protected_call(vm, 0, 0, "timer callback");
 
-            found = std::find_if(vm.timers.begin(), vm.timers.end(),
-                                 [id](const Timer& timer) { return timer.id == id; });
+            found = std::find_if(
+                vm.timers.begin(), vm.timers.end(),
+                [id](const Timer& timer) { return timer.id == id; });
             if (found == vm.timers.end()) continue;
             if (!succeeded) found->cancelled = true;
             if (found->repeat && !found->cancelled) {
@@ -343,11 +382,14 @@ void Runtime::tick() {
         }
 
         vm.timers.erase(
-            std::remove_if(vm.timers.begin(), vm.timers.end(), [&](const Timer& timer) {
-                if (!timer.cancelled) return false;
-                luaL_unref(vm.state, LUA_REGISTRYINDEX, timer.reference);
-                return true;
-            }),
+            std::remove_if(
+                vm.timers.begin(), vm.timers.end(),
+                [&](const Timer& timer) {
+                    if (!timer.cancelled) return false;
+                    luaL_unref(vm.state, LUA_REGISTRYINDEX,
+                               timer.reference);
+                    return true;
+                }),
             vm.timers.end());
     }
     emit("game_frame", [&](lua_State* state) {
