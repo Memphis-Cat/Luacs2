@@ -18,6 +18,7 @@ $advancedAdapter = Join-Path $root "src\plugin\game_api_advanced_build.cpp"
 $advancedComplete = Join-Path $root "src\plugin\game_api_advanced_complete_build.cpp"
 $advancedFinal = Join-Path $root "src\plugin\game_api_advanced_final_build.cpp"
 $advancedVerified = Join-Path $root "src\plugin\game_api_advanced_verified_build.cpp"
+$generatedAdvanced = Join-Path $root "build\generated\advanced\game_api_advanced.cpp"
 $propertiesSource = Join-Path $root "src\modules\properties\properties.cpp"
 $tracesSource = Join-Path $root "src\modules\traces\traces.cpp"
 $tracesVerified = Join-Path $root "src\modules\traces\traces_verified.cpp"
@@ -36,6 +37,23 @@ function Assert-SourceTokens {
     foreach ($token in $Tokens) {
         if ($text -notmatch [regex]::Escape($token)) {
             throw "source file '$Path' is missing '$token'"
+        }
+    }
+}
+
+function Assert-SourceOmits {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$Tokens
+    )
+
+    if (-not (Test-Path $Path)) {
+        throw "required source file is missing: $Path"
+    }
+    $text = Get-Content $Path -Raw
+    foreach ($token in $Tokens) {
+        if ($text -match [regex]::Escape($token)) {
+            throw "source file '$Path' still contains obsolete token '$token'"
         }
     }
 }
@@ -68,9 +86,20 @@ try {
     }
 
     Assert-SourceTokens $cmakeFile @(
-        "src/plugin/game_api_advanced_verified_build.cpp",
+        "LUACS_LEGACY_NATIVE_RAY",
+        "using NativeRay = Ray_t;",
+        "generated/advanced",
+        "game_api_advanced_verified_build.cpp",
         "add_luacs_module(traces src/modules/traces/traces_verified.cpp)",
         "sourcehook_impl_chookmaninfo.cpp"
+    )
+    Assert-SourceTokens $generatedAdvanced @(
+        "using NativeRay = Ray_t;",
+        "using TraceShapeFn"
+    )
+    Assert-SourceOmits $generatedAdvanced @(
+        "std::array<std::byte, 40> data{};",
+        "static_assert(sizeof(NativeRay) == 44);"
     )
     Assert-SourceTokens $advancedHeader @(
         "kAdvancedWorldServicesAbiVersion = 3",
@@ -203,7 +232,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
+    Write-Host "LuaCS package, real Ray_t resolver, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
