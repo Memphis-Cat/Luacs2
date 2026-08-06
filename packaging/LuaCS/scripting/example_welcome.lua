@@ -15,6 +15,70 @@ local players = require("cs2.players")
 local weapons = require("cs2.weapons")
 local hud = require("cs2.hud")
 local cvars = require("cs2.cvars")
+local timers = require("cs2.timers")
+
+local SPAWN_RETRY_DELAY = 0.05
+local MAX_SPAWN_ATTEMPTS = 20
+local spawn_generation = {}
+
+local function warn_operation(label, player, error_message)
+    print("[WARN] " .. label .. " failed for slot " .. player.slot .. ": " ..
+        tostring(error_message or "operation failed"))
+end
+
+local function apply_player_change(label, player, operation)
+    local ok, error_message = operation()
+    if not ok then
+        warn_operation(label, player, error_message)
+    end
+    return ok
+end
+
+local function configure_spawn(player, generation, attempt)
+    if spawn_generation[player.slot] ~= generation then return end
+
+    local refreshed, refresh_error = player:refresh()
+    if not refreshed or not player.has_pawn then
+        if attempt < MAX_SPAWN_ATTEMPTS then
+            timers.after(SPAWN_RETRY_DELAY, function()
+                configure_spawn(player, generation, attempt + 1)
+            end)
+        else
+            warn_operation("spawn setup", player,
+                refresh_error or "player pawn did not become ready")
+        end
+        return
+    end
+
+    apply_player_change("set_health", player, function()
+        return player:set_health(100)
+    end)
+    apply_player_change("set_armor", player, function()
+        return player:set_armor(100)
+    end)
+    apply_player_change("set_money", player, function()
+        return player:set_money(16000)
+    end)
+    apply_player_change("set_helmet", player, function()
+        return player:set_helmet(true)
+    end)
+
+    local ak, give_error = weapons.give(player, "weapon_ak47")
+    if not ak then
+        warn_operation("weapon_ak47", player, give_error)
+        return
+    end
+
+    local clip_ok, clip_error = ak:set_clip1(30)
+    if not clip_ok then warn_operation("set_clip1", player, clip_error) end
+
+    local reserve_ok, reserve_error = ak:set_reserve1(90)
+    if not reserve_ok then
+        warn_operation("set_reserve1", player, reserve_error)
+    end
+
+    hud.chat(player, "LuaCS live player and inventory API is active.")
+end
 
 -- LuaCS lifecycle event: player metadata is supplied directly.
 events.Instance:OnPlayerActivate(function(player)
@@ -22,26 +86,19 @@ events.Instance:OnPlayerActivate(function(player)
     hud.chat(player, "Welcome, " .. player.name .. "!")
 end)
 
--- Real CS2 game event, pre-fire. The event object is live and mutable only
--- during this callback. Typed getters resolve player/entity fields safely.
-events.on("player_spawn", function(event)
+-- Real CS2 game event, post-fire. CS2 can emit more than one early spawn event
+-- while a player is joining, and the pawn may not exist until a later frame.
+-- A generation token keeps only the newest setup request for each slot, while
+-- bounded timer retries wait for the live pawn without hiding a real failure.
+events.on_post("player_spawn", function(event)
     local player = event:get_player("userid")
     if not player then return end
 
-    player:set_health(100)
-    player:set_armor(100)
-    player:set_money(16000)
-    player:set_helmet(true)
-
-    local ak, give_error = weapons.give(player, "weapon_ak47")
-    if not ak then
-        print("[WARN] weapon_ak47 failed:", give_error)
-        return
-    end
-
-    ak:set_clip1(30)
-    ak:set_reserve1(90)
-    hud.chat(player, "LuaCS live player and inventory API is active.")
+    local generation = (spawn_generation[player.slot] or 0) + 1
+    spawn_generation[player.slot] = generation
+    timers.after(0.0, function()
+        configure_spawn(player, generation, 1)
+    end)
 end)
 
 -- Read fields from a real CS2 event.
