@@ -11,6 +11,7 @@ $key = Join-Path $luaCs "config\luacs.key"
 $badSource = Join-Path $luaCs "scripting\syntax_failure.lua"
 $badOutput = Join-Path $luaCs "plugins\syntax_failure.smg"
 $vdf = Join-Path $addons "metamod\luacs2.vdf"
+$advancedGamedata = Join-Path $luaCs "gamedata\reference\advanced_windows_gamedata.json"
 
 try {
     $requiredNativeFiles = @(
@@ -27,12 +28,25 @@ try {
         "teams.dll",
         "rounds.dll",
         "entities.dll",
-        "sounds.dll"
+        "sounds.dll",
+        "properties.dll",
+        "traces.dll",
+        "grenades.dll"
     )
     foreach ($name in $requiredNativeFiles) {
         $path = Join-Path $bin $name
         if (-not (Test-Path $path)) {
             throw "required native file is missing from bin\win64: $name"
+        }
+    }
+
+    if (-not (Test-Path $advancedGamedata)) {
+        throw "advanced Windows gamedata was not packaged"
+    }
+    $advancedText = Get-Content $advancedGamedata -Raw
+    foreach ($entry in @("GameTraceManager", "TraceFunc", "TraceShape")) {
+        if ($advancedText -notmatch [regex]::Escape($entry)) {
+            throw "advanced gamedata is missing '$entry'"
         }
     }
 
