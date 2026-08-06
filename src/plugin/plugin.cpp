@@ -6,6 +6,7 @@
 #include <Color.h>
 #include <igameevents.h>
 #include <tier0/dbg.h>
+#include <tier1/convar.h>
 
 #include <cstdio>
 #include <filesystem>
@@ -32,7 +33,9 @@ LuaCSPlugin g_LuaCSPlugin;
 IServerGameDLL* g_server = nullptr;
 IServerGameClients* g_game_clients = nullptr;
 IVEngineServer* g_engine = nullptr;
+IGameEventManager2* g_game_events = nullptr;
 HMODULE g_lua_module = nullptr;
+luacs::Runtime* g_runtime = nullptr;
 
 namespace {
 
@@ -126,6 +129,26 @@ void write_console(std::string_view line) {
     ConColorMsg(color, "%.*s\n", static_cast<int>(line.size()), line.data());
 }
 
+void command_lua(const CCommandContext&, const CCommand& command) {
+    if (!g_runtime) {
+        write_console("[ERROR] (lua) LuaCS runtime is not initialized.");
+        return;
+    }
+
+    std::string command_line = "lua";
+    for (int index = 1; index < command.ArgC(); ++index) {
+        const char* argument = command.Arg(index);
+        if (!argument) continue;
+        command_line.push_back(' ');
+        command_line += argument;
+    }
+    g_runtime->client_command(-1, command_line);
+}
+
+ConCommand g_lua_command(
+    "lua", ConCommandCallbackInfo_t(&command_lua),
+    "LuaCS runtime and plugin administration. Use 'lua help'.", FCVAR_RELEASE);
+
 } // namespace
 
 PLUGIN_EXPOSE(LuaCSPlugin, g_LuaCSPlugin);
@@ -138,6 +161,8 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
 
     GET_V_IFACE_CURRENT(GetEngineFactory, g_engine, IVEngineServer,
                         INTERFACEVERSION_VENGINESERVER);
+    GET_V_IFACE_CURRENT(GetEngineFactory, g_game_events, IGameEventManager2,
+                        INTERFACEVERSION_GAMEEVENTSMANAGER2);
     GET_V_IFACE_ANY(GetServerFactory, g_server, IServerGameDLL,
                     INTERFACEVERSION_SERVERGAMEDLL);
     GET_V_IFACE_ANY(GetServerFactory, g_game_clients, IServerGameClients,
@@ -172,6 +197,7 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         copy_error(error, maxlen, message);
         return false;
     }
+    game_api_.set_event_manager(g_game_events);
     if (!game_api_error.empty()) {
         write_console("[WARN] (lua) " + game_api_error);
     }
@@ -197,14 +223,24 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         return false;
     }
     runtime_.set_host_operations(game_api_.host_operations());
+    g_runtime = &runtime_;
 
-    auto* event_vtable = static_cast<IGameEventManager2*>(
-        game_api_.event_manager_vtable());
-    fire_event_pre_hook_id_ = SH_ADD_DVPHOOK(
-        IGameEventManager2, FireEvent, event_vtable,
+    if (!META_REGCVAR(&g_lua_command)) {
+        g_runtime = nullptr;
+        runtime_.shutdown();
+        game_api_.shutdown();
+        const std::string message =
+            "Could not register the server-console 'lua' command.";
+        write_console("[ERROR] (lua) " + message);
+        copy_error(error, maxlen, message);
+        return false;
+    }
+
+    fire_event_pre_hook_id_ = SH_ADD_HOOK(
+        IGameEventManager2, FireEvent, g_game_events,
         SH_MEMBER(this, &LuaCSPlugin::Hook_FireEvent), false);
-    fire_event_post_hook_id_ = SH_ADD_DVPHOOK(
-        IGameEventManager2, FireEvent, event_vtable,
+    fire_event_post_hook_id_ = SH_ADD_HOOK(
+        IGameEventManager2, FireEvent, g_game_events,
         SH_MEMBER(this, &LuaCSPlugin::Hook_FireEventPost), true);
     if (fire_event_pre_hook_id_ < 0 || fire_event_post_hook_id_ < 0) {
         if (fire_event_pre_hook_id_ >= 0) {
@@ -213,10 +249,12 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         if (fire_event_post_hook_id_ >= 0) {
             SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
         }
+        META_UNREGCVAR(&g_lua_command);
+        g_runtime = nullptr;
         runtime_.shutdown();
         game_api_.shutdown();
         const std::string message =
-            "Could not install CGameEventManager::FireEvent pre/post hooks.";
+            "Could not install IGameEventManager2::FireEvent pre/post hooks.";
         write_console("[ERROR] (lua) " + message);
         copy_error(error, maxlen, message);
         return false;
@@ -263,9 +301,12 @@ bool LuaCSPlugin::Unload(char*, size_t) {
         SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
         fire_event_post_hook_id_ = -1;
     }
+    META_UNREGCVAR(&g_lua_command);
+    g_runtime = nullptr;
     free_event_copies();
     runtime_.shutdown();
     game_api_.shutdown();
+    g_game_events = nullptr;
     write_console("[INFO] (lua) LuaCS unloaded.");
     return true;
 }
@@ -317,6 +358,7 @@ void LuaCSPlugin::Hook_ClientCommand(CPlayerSlot slot,
 
 bool LuaCSPlugin::Hook_FireEvent(IGameEvent* event, bool dont_broadcast) {
     auto* manager = META_IFACEPTR(IGameEventManager2);
+    if (!manager) manager = g_game_events;
     game_api_.set_event_manager(manager);
 
     if (!manager || !event) {
