@@ -3,6 +3,7 @@
 #include "luacs/world_api.h"
 
 #include <gametrace.h>
+#include <ray.h>
 #include <schemasystem/schemasystem.h>
 #include <schemasystem/schematypes.h>
 #include <tier1/utlstring.h>
@@ -37,8 +38,8 @@ luacs::PropertyKind classify(CSchemaType* type, std::uint16_t& width,
 } // namespace
 
 // The adapter is the compatibility boundary around the implementation file. It
-// needs access to the resolved native trace entry points so ABI v2 can use the
-// real Source 2 CTraceFilter rather than dropping its new filter fields.
+// needs access to the resolved native trace entry points so the current ABI can
+// use the real Source 2 CTraceFilter and Ray_t types.
 #define private public
 #include "game_api_advanced.cpp"
 #undef private
@@ -530,6 +531,10 @@ bool finite_vector(const luacs::Vector3& value) {
            std::isfinite(value.z);
 }
 
+Vector native_vector(const luacs::Vector3& value) {
+    return Vector(value.x, value.y, value.z);
+}
+
 bool append_ignore(int value, int* output, std::size_t& count) {
     if (value < 0) return true;
     for (std::size_t index = 0; index < count; ++index) {
@@ -540,7 +545,7 @@ bool append_ignore(int value, int* output, std::size_t& count) {
     return true;
 }
 
-bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
+bool trace_v3(void* context, const TraceRequest* request, TraceResult* output,
               char* error, std::size_t error_size) {
     if (error && error_size) error[0] = '\0';
     if (!context || !request || !output) {
@@ -555,12 +560,16 @@ bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
         write_error(error, error_size, "trace ignore count exceeds ABI capacity");
         return false;
     }
+    if (request->mesh_vertex_count > luacs::kTraceMeshVertexCapacity) {
+        write_error(error, error_size,
+                    "trace mesh vertex count exceeds ABI capacity");
+        return false;
+    }
 
     const TraceShape shape =
         request->use_hull ? TraceShape::Hull : request->shape;
-    if (shape == TraceShape::Sphere || shape == TraceShape::Capsule) {
-        write_error(error, error_size,
-                    "sphere and capsule traces require a verified native Ray_t layout and are not enabled yet");
+    if (shape < TraceShape::Line || shape > TraceShape::Mesh) {
+        write_error(error, error_size, "trace shape is out of range");
         return false;
     }
 
@@ -600,8 +609,12 @@ bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
     filter.m_nInteractsExclude = request->interacts_exclude;
     filter.m_nObjectSetMask = static_cast<std::uint8_t>(
         request->ignore_entities_mask ? request->ignore_entities_mask : 0x0F);
-    filter.m_nCollisionGroup = collision_group;
+    filter.m_nCollisionGroup = static_cast<std::uint8_t>(collision_group);
+    filter.m_nIncludedDetailLayers = request->included_detail_layers;
+    filter.m_nTargetDetailLayer = request->target_detail_layer;
     filter.m_bHitSolid = request->hit_solid;
+    filter.m_bHitSolidRequiresGenerateContacts =
+        request->hit_solid_requires_generate_contacts;
     filter.m_bHitTrigger = request->hit_triggers;
     filter.m_bShouldIgnoreDisabledPairs = request->ignore_disabled_pairs;
     filter.m_bIgnoreIfBothInteractWithHitboxes =
@@ -611,25 +624,72 @@ bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
     if (ignored_count > 0) filter.SetPassEntity1(api->entity(ignored[0]));
     if (ignored_count > 1) filter.SetPassEntity2(api->entity(ignored[1]));
 
-    LuaCSAdvancedApi::NativeRay ray;
-    if (shape == TraceShape::Hull) {
-        if (!finite_vector(request->mins) || !finite_vector(request->maxs)) {
-            write_error(error, error_size, "hull bounds must be finite");
-            return false;
-        }
-        auto* bounds = reinterpret_cast<Vector*>(ray.data.data());
-        bounds[0] = Vector(request->mins.x, request->mins.y, request->mins.z);
-        bounds[1] = Vector(request->maxs.x, request->maxs.y, request->maxs.z);
-        ray.type = 2;
-    } else {
-        ray.type = 0;
+    Ray_t ray;
+    std::vector<Vector> mesh_vertices;
+    switch (shape) {
+        case TraceShape::Line:
+            ray.Init(Vector(0.0f, 0.0f, 0.0f));
+            break;
+        case TraceShape::Sphere:
+            if (!finite_vector(request->center_a) ||
+                !std::isfinite(request->radius) || request->radius <= 0.0f) {
+                write_error(error, error_size,
+                            "sphere traces require a finite center and positive radius");
+                return false;
+            }
+            ray.Init(native_vector(request->center_a), request->radius);
+            break;
+        case TraceShape::Hull:
+            if (!finite_vector(request->mins) || !finite_vector(request->maxs)) {
+                write_error(error, error_size, "hull bounds must be finite");
+                return false;
+            }
+            ray.Init(native_vector(request->mins), native_vector(request->maxs));
+            break;
+        case TraceShape::Capsule:
+            if (!finite_vector(request->center_a) ||
+                !finite_vector(request->center_b) ||
+                !std::isfinite(request->radius) || request->radius <= 0.0f) {
+                write_error(error, error_size,
+                            "capsule traces require finite centers and a positive radius");
+                return false;
+            }
+            ray.Init(native_vector(request->center_a),
+                     native_vector(request->center_b), request->radius);
+            break;
+        case TraceShape::Mesh:
+            if (!finite_vector(request->mins) || !finite_vector(request->maxs)) {
+                write_error(error, error_size, "mesh bounds must be finite");
+                return false;
+            }
+            if (request->mesh_vertex_count < 3) {
+                write_error(error, error_size,
+                            "mesh traces require at least three vertices");
+                return false;
+            }
+            mesh_vertices.reserve(request->mesh_vertex_count);
+            for (std::size_t index = 0; index < request->mesh_vertex_count;
+                 ++index) {
+                if (!finite_vector(request->mesh_vertices[index])) {
+                    write_error(error, error_size,
+                                "mesh trace vertices must be finite");
+                    return false;
+                }
+                mesh_vertices.push_back(native_vector(request->mesh_vertices[index]));
+            }
+            ray.Init(native_vector(request->mins), native_vector(request->maxs),
+                     mesh_vertices.data(),
+                     static_cast<int>(mesh_vertices.size()));
+            break;
     }
 
-    const Vector start(request->start.x, request->start.y, request->start.z);
-    const Vector end(request->end.x, request->end.y, request->end.z);
+    const Vector start = native_vector(request->start);
+    const Vector end = native_vector(request->end);
     CGameTrace native;
-    if (!api->trace_shape_(api->trace_manager_, &ray, &start, &end, &filter,
-                           &native)) {
+    if (!api->trace_shape_(
+            api->trace_manager_,
+            reinterpret_cast<LuaCSAdvancedApi::NativeRay*>(&ray), &start, &end,
+            &filter, &native)) {
         write_error(error, error_size,
                     "Source 2 TraceShape rejected the request");
         return false;
@@ -643,8 +703,9 @@ bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
         native.m_bStartInSolid && native.m_flFraction <= 0.0f;
     output->exact_hit_point = native.m_bExactHitPoint;
     output->fraction = native.m_flFraction;
+    output->fraction_left_solid_available = false;
     output->hit_offset = native.m_flHitOffset;
-    output->shape = shape;
+    output->shape = static_cast<TraceShape>(ray.m_eType);
     output->start = {native.m_vStartPos.x, native.m_vStartPos.y,
                      native.m_vStartPos.z};
     output->end = {native.m_vEndPos.x, native.m_vEndPos.y,
@@ -653,9 +714,31 @@ bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
                             native.m_vHitPoint.z};
     output->plane_normal = {native.m_vHitNormal.x, native.m_vHitNormal.y,
                             native.m_vHitNormal.z};
+    output->contents64 = native.m_nContents;
     output->contents = static_cast<int>(native.m_nContents);
     output->triangle = native.m_nTriangle;
     output->bone = native.m_nHitboxBoneIndex;
+    output->physics_body =
+        reinterpret_cast<std::uintptr_t>(native.m_hBody);
+    output->physics_shape =
+        reinterpret_cast<std::uintptr_t>(native.m_hShape);
+    output->shape_interacts_as = native.m_ShapeAttributes.m_nInteractsAs;
+    output->shape_interacts_with = native.m_ShapeAttributes.m_nInteractsWith;
+    output->shape_interacts_exclude =
+        native.m_ShapeAttributes.m_nInteractsExclude;
+    output->shape_entity_id = native.m_ShapeAttributes.m_nEntityId;
+    output->shape_owner_id = native.m_ShapeAttributes.m_nOwnerId;
+    output->shape_hierarchy_id = native.m_ShapeAttributes.m_nHierarchyId;
+    output->shape_detail_layer_mask =
+        native.m_ShapeAttributes.m_nDetailLayerMask;
+    output->shape_detail_layer_mask_type =
+        native.m_ShapeAttributes.m_nDetailLayerMaskType;
+    output->shape_target_detail_layer =
+        native.m_ShapeAttributes.m_nTargetDetailLayer;
+    output->shape_collision_group =
+        native.m_ShapeAttributes.m_nCollisionGroup;
+    output->shape_collision_function_mask =
+        native.m_ShapeAttributes.m_nCollisionFunctionMask;
 
     const float delta_x = output->hit_position.x - output->start.x;
     const float delta_y = output->hit_position.y - output->start.y;
@@ -683,8 +766,8 @@ bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
     return true;
 }
 
-struct AdvancedWorldV2Registration {
-    AdvancedWorldV2Registration() {
+struct AdvancedWorldV3Registration {
+    AdvancedWorldV3Registration() {
         auto& services = g_advanced_api.services;
         services.property_info = &property_info_v2;
         services.property_at = &property_at_v2;
@@ -694,10 +777,10 @@ struct AdvancedWorldV2Registration {
         services.property_collection_resize = &property_collection_resize_v2;
         services.property_child_count = &property_child_count_v2;
         services.property_child_at = &property_child_at_v2;
-        services.trace = &trace_v2;
+        services.trace = &trace_v3;
     }
 };
 
-AdvancedWorldV2Registration g_advanced_world_v2_registration;
+AdvancedWorldV3Registration g_advanced_world_v3_registration;
 
 } // namespace
