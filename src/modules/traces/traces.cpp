@@ -8,6 +8,7 @@ extern "C" {
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace {
 using luacs::AdvancedWorldServices;
@@ -89,6 +90,40 @@ std::uint64_t read_u64_field(lua_State* state, int table, const char* key,
     return value;
 }
 
+std::uint16_t read_u16_field(lua_State* state, int table, const char* key,
+                             std::uint16_t fallback) {
+    lua_getfield(state, table, key);
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return fallback;
+    }
+    const lua_Integer value = luaL_checkinteger(state, -1);
+    lua_pop(state, 1);
+    if (value < 0 ||
+        value > static_cast<lua_Integer>(
+                    std::numeric_limits<std::uint16_t>::max())) {
+        luaL_error(state, "%s must fit in an unsigned 16-bit integer", key);
+    }
+    return static_cast<std::uint16_t>(value);
+}
+
+std::uint8_t read_u8_field(lua_State* state, int table, const char* key,
+                           std::uint8_t fallback) {
+    lua_getfield(state, table, key);
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return fallback;
+    }
+    const lua_Integer value = luaL_checkinteger(state, -1);
+    lua_pop(state, 1);
+    if (value < 0 ||
+        value > static_cast<lua_Integer>(
+                    std::numeric_limits<std::uint8_t>::max())) {
+        luaL_error(state, "%s must fit in an unsigned 8-bit integer", key);
+    }
+    return static_cast<std::uint8_t>(value);
+}
+
 float read_float_field(lua_State* state, int table, const char* key,
                        float fallback) {
     lua_getfield(state, table, key);
@@ -118,7 +153,7 @@ TraceShape read_shape_field(lua_State* state, int table,
     const lua_Integer value = luaL_checkinteger(state, -1);
     lua_pop(state, 1);
     if (value < static_cast<lua_Integer>(TraceShape::Line) ||
-        value > static_cast<lua_Integer>(TraceShape::Capsule)) {
+        value > static_cast<lua_Integer>(TraceShape::Mesh)) {
         luaL_error(state, "trace shape is out of range");
     }
     return static_cast<TraceShape>(value);
@@ -162,6 +197,36 @@ void read_ignore_value(lua_State* state, int index, TraceRequest& request) {
     }
 }
 
+void read_mesh_table(lua_State* state, int index, TraceRequest& request) {
+    luaL_checktype(state, index, LUA_TTABLE);
+    const lua_Integer length = luaL_len(state, index);
+    if (length < 0 ||
+        static_cast<std::uint64_t>(length) >
+            static_cast<std::uint64_t>(luacs::kTraceMeshVertexCapacity)) {
+        luaL_error(state, "trace mesh exceeds %d vertices",
+                   static_cast<int>(luacs::kTraceMeshVertexCapacity));
+    }
+    request.mesh_vertex_count = static_cast<std::size_t>(length);
+    for (lua_Integer item = 1; item <= length; ++item) {
+        lua_geti(state, index, item);
+        request.mesh_vertices[static_cast<std::size_t>(item - 1)] =
+            read_vector(state, -1);
+        lua_pop(state, 1);
+    }
+}
+
+bool read_optional_mesh(lua_State* state, int table, const char* key,
+                        TraceRequest& request) {
+    lua_getfield(state, table, key);
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return false;
+    }
+    read_mesh_table(state, -1, request);
+    lua_pop(state, 1);
+    return true;
+}
+
 void read_options(lua_State* state, int table, TraceRequest& request) {
     if (!lua_istable(state, table)) return;
 
@@ -181,10 +246,18 @@ void read_options(lua_State* state, int table, TraceRequest& request) {
     request.ignore_entities_mask = read_u64_field(
         state, table, "object_set_mask", request.ignore_entities_mask);
     request.radius = read_float_field(state, table, "radius", request.radius);
+    request.included_detail_layers = read_u16_field(
+        state, table, "included_detail_layers",
+        request.included_detail_layers);
+    request.target_detail_layer = read_u8_field(
+        state, table, "target_detail_layer", request.target_detail_layer);
     request.hit_triggers =
         read_bool_field(state, table, "hit_triggers", request.hit_triggers);
     request.hit_solid =
         read_bool_field(state, table, "hit_solid", request.hit_solid);
+    request.hit_solid_requires_generate_contacts = read_bool_field(
+        state, table, "hit_solid_requires_generate_contacts",
+        request.hit_solid_requires_generate_contacts);
     request.ignore_disabled_pairs = read_bool_field(
         state, table, "ignore_disabled_pairs", request.ignore_disabled_pairs);
     request.ignore_if_both_hitboxes = read_bool_field(
@@ -200,6 +273,9 @@ void read_options(lua_State* state, int table, TraceRequest& request) {
     read_optional_vector(state, table, "maxs", request.maxs);
     read_optional_vector(state, table, "center_a", request.center_a);
     read_optional_vector(state, table, "center_b", request.center_b);
+    if (!read_optional_mesh(state, table, "mesh_vertices", request)) {
+        read_optional_mesh(state, table, "vertices", request);
+    }
 
     lua_getfield(state, table, "ignore");
     read_ignore_value(state, -1, request);
@@ -210,12 +286,12 @@ void read_options(lua_State* state, int table, TraceRequest& request) {
 }
 
 void push_result(lua_State* state, const TraceResult& result) {
-    lua_createtable(state, 0, 30);
+    lua_createtable(state, 0, 48);
 #define SET_BOOL(name)                                                         \
     lua_pushboolean(state, result.name);                                       \
     lua_setfield(state, -2, #name)
 #define SET_INT(name)                                                          \
-    lua_pushinteger(state, result.name);                                       \
+    lua_pushinteger(state, static_cast<lua_Integer>(result.name));             \
     lua_setfield(state, -2, #name)
 #define SET_NUM(name)                                                          \
     lua_pushnumber(state, result.name);                                        \
@@ -225,20 +301,34 @@ void push_result(lua_State* state, const TraceResult& result) {
     SET_BOOL(start_solid);
     SET_BOOL(all_solid);
     SET_BOOL(exact_hit_point);
+    SET_BOOL(fraction_left_solid_available);
     SET_NUM(fraction);
     SET_NUM(fraction_left_solid);
     SET_NUM(plane_distance);
     SET_NUM(distance);
     SET_NUM(hit_offset);
     SET_INT(entity_index);
-    lua_pushinteger(state, result.entity_handle);
-    lua_setfield(state, -2, "entity_handle");
+    SET_INT(entity_handle);
     SET_INT(hitbox);
     SET_INT(hitgroup);
     SET_INT(surface_flags);
     SET_INT(contents);
+    SET_INT(contents64);
     SET_INT(triangle);
     SET_INT(bone);
+    SET_INT(physics_body);
+    SET_INT(physics_shape);
+    SET_INT(shape_interacts_as);
+    SET_INT(shape_interacts_with);
+    SET_INT(shape_interacts_exclude);
+    SET_INT(shape_entity_id);
+    SET_INT(shape_owner_id);
+    SET_INT(shape_hierarchy_id);
+    SET_INT(shape_detail_layer_mask);
+    SET_INT(shape_detail_layer_mask_type);
+    SET_INT(shape_target_detail_layer);
+    SET_INT(shape_collision_group);
+    SET_INT(shape_collision_function_mask);
     lua_pushinteger(state, static_cast<lua_Integer>(result.shape));
     lua_setfield(state, -2, "shape");
 #undef SET_NUM
@@ -276,9 +366,9 @@ int line(lua_State* state) {
     TraceRequest request;
     request.start = read_vector(state, 1);
     request.end = read_vector(state, 2);
-    request.shape = TraceShape::Line;
     read_options(state, 3, request);
-    request.use_hull = request.shape == TraceShape::Hull;
+    request.shape = TraceShape::Line;
+    request.use_hull = false;
     return run(state, request);
 }
 
@@ -288,11 +378,47 @@ int hull(lua_State* state) {
     request.end = read_vector(state, 2);
     request.mins = read_vector(state, 3);
     request.maxs = read_vector(state, 4);
-    request.shape = TraceShape::Hull;
-    request.use_hull = true;
     read_options(state, 5, request);
     request.shape = TraceShape::Hull;
     request.use_hull = true;
+    return run(state, request);
+}
+
+int sphere(lua_State* state) {
+    TraceRequest request;
+    request.start = read_vector(state, 1);
+    request.end = read_vector(state, 2);
+    request.center_a = read_vector(state, 3);
+    request.radius = static_cast<float>(luaL_checknumber(state, 4));
+    read_options(state, 5, request);
+    request.shape = TraceShape::Sphere;
+    request.use_hull = false;
+    return run(state, request);
+}
+
+int capsule(lua_State* state) {
+    TraceRequest request;
+    request.start = read_vector(state, 1);
+    request.end = read_vector(state, 2);
+    request.center_a = read_vector(state, 3);
+    request.center_b = read_vector(state, 4);
+    request.radius = static_cast<float>(luaL_checknumber(state, 5));
+    read_options(state, 6, request);
+    request.shape = TraceShape::Capsule;
+    request.use_hull = false;
+    return run(state, request);
+}
+
+int mesh(lua_State* state) {
+    TraceRequest request;
+    request.start = read_vector(state, 1);
+    request.end = read_vector(state, 2);
+    request.mins = read_vector(state, 3);
+    request.maxs = read_vector(state, 4);
+    read_mesh_table(state, 5, request);
+    read_options(state, 6, request);
+    request.shape = TraceShape::Mesh;
+    request.use_hull = false;
     return run(state, request);
 }
 
@@ -428,6 +554,7 @@ void add_trace_constants(lua_State* state) {
     add_mask(state, "SHAPE_HULL", static_cast<std::uint64_t>(TraceShape::Hull));
     add_mask(state, "SHAPE_CAPSULE",
              static_cast<std::uint64_t>(TraceShape::Capsule));
+    add_mask(state, "SHAPE_MESH", static_cast<std::uint64_t>(TraceShape::Mesh));
 }
 } // namespace
 
@@ -439,11 +566,14 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     if (!advanced()) {
         return luaL_error(state, "LuaCS advanced world services are unavailable");
     }
-    lua_createtable(state, 0, 64);
+    lua_createtable(state, 0, 72);
     add_function(state, api, "cast", &cast);
     add_function(state, api, "ray", &ray);
     add_function(state, api, "line", &line);
+    add_function(state, api, "sphere", &sphere);
     add_function(state, api, "hull", &hull);
+    add_function(state, api, "capsule", &capsule);
+    add_function(state, api, "mesh", &mesh);
     add_trace_constants(state);
     return 1;
 }
