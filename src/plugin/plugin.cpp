@@ -10,6 +10,7 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -44,6 +45,7 @@ luacs::Runtime* g_runtime = nullptr;
 namespace {
 
 bool g_lua_command_registered = false;
+std::filesystem::path g_native_error_log;
 
 std::filesystem::path module_path() {
     HMODULE module{};
@@ -130,7 +132,36 @@ Color line_color(std::string_view line) {
     return Color(105, 205, 255, 255);
 }
 
+void append_native_error(std::string_view line) {
+    if (g_native_error_log.empty() ||
+        line.find("[ERROR]") == std::string_view::npos) {
+        return;
+    }
+
+    std::error_code directory_error;
+    std::filesystem::create_directories(g_native_error_log.parent_path(),
+                                        directory_error);
+    if (directory_error) return;
+
+    std::ofstream output(g_native_error_log, std::ios::app);
+    if (!output) return;
+
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    char timestamp[32]{};
+    std::snprintf(timestamp, sizeof(timestamp),
+                  "%04u-%02u-%02u %02u:%02u:%02u ",
+                  static_cast<unsigned>(now.wYear),
+                  static_cast<unsigned>(now.wMonth),
+                  static_cast<unsigned>(now.wDay),
+                  static_cast<unsigned>(now.wHour),
+                  static_cast<unsigned>(now.wMinute),
+                  static_cast<unsigned>(now.wSecond));
+    output << timestamp << line << '\n';
+}
+
 void write_console(std::string_view line) {
+    append_native_error(line);
     const auto color = line_color(line);
     ConColorMsg(color, "%.*s\n", static_cast<int>(line.size()), line.data());
 }
@@ -198,6 +229,7 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         copy_error(error, maxlen, message);
         return false;
     }
+    g_native_error_log = root / "logs" / "luacs-errors.log";
 
     std::string dependency_error;
     if (!preload_lua(dll.parent_path(), dependency_error)) {
