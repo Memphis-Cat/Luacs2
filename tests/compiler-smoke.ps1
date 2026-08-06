@@ -20,7 +20,14 @@ try {
         "timers.dll",
         "players.dll",
         "commands.dll",
-        "math.dll"
+        "math.dll",
+        "weapons.dll",
+        "hud.dll",
+        "cvars.dll",
+        "teams.dll",
+        "rounds.dll",
+        "entities.dll",
+        "sounds.dll"
     )
     foreach ($name in $requiredNativeFiles) {
         $path = Join-Path $bin $name
