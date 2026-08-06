@@ -15,7 +15,7 @@ extern "C" {
 
 namespace luacs {
 
-inline constexpr std::uint32_t kModuleAbiVersion = 1;
+inline constexpr std::uint32_t kModuleAbiVersion = 2;
 
 struct PlayerInfo {
     int slot{-1};
@@ -30,6 +30,14 @@ struct PlayerInfo {
 enum class EventCallbackMode : std::uint32_t {
     EventTable = 0,
     PlayerOnly = 1,
+};
+
+enum class HudDestination : int {
+    Notify = 1,
+    Console = 2,
+    Chat = 3,
+    Center = 4,
+    Alert = 6,
 };
 
 struct Services {
@@ -51,6 +59,23 @@ struct Services {
 
     bool (*command_on)(void* context, lua_State* state, const char* command_name,
                        int callback_index){nullptr};
+
+    bool (*hud_print)(void* context, int slot, int destination, const char* message,
+                      char* error, std::size_t error_size){nullptr};
+
+    bool (*cvar_exists)(void* context, const char* name){nullptr};
+    bool (*cvar_get)(void* context, const char* name, char* output,
+                     std::size_t output_size, char* error,
+                     std::size_t error_size){nullptr};
+    bool (*cvar_set)(void* context, const char* name, const char* value,
+                     char* error, std::size_t error_size){nullptr};
+
+    bool (*weapon_give)(void* context, int slot, const char* class_name,
+                        char* error, std::size_t error_size){nullptr};
+    bool (*weapon_remove_all)(void* context, int slot, char* error,
+                              std::size_t error_size){nullptr};
+    bool (*weapon_drop_active)(void* context, int slot, char* error,
+                               std::size_t error_size){nullptr};
 };
 
 using OpenModuleFn = int (*)(lua_State* state, const Services* services);
