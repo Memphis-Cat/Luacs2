@@ -525,8 +525,6 @@ bool LuaCSGameApi::initialize(const std::filesystem::path& luacs_root,
     const auto set_pawn_pattern =
         entry_windows_value(gamedata, "CBasePlayerController_SetPawn");
 
-    // This current CS2 virtual index is also stored in the bundled reference
-    // pack. Keep the fallback so older LuaCS packages remain upgradeable.
     if (!select_weapon_index) select_weapon_index = 30;
 
     if (!game_entity_system_offset || !give_index || !remove_all_index ||
@@ -648,11 +646,25 @@ bool LuaCSGameApi::initialize(const std::filesystem::path& luacs_root,
         luacs_game_internal::find_virtual_table(server_module,
                                                 "CGameEventManager");
 
-    if (!impl_->client_print || !impl_->client_print_all ||
-        !impl_->remove_player_item || !impl_->remove_entity ||
-        !impl_->switch_team || !impl_->set_pawn ||
-        !impl_->event_manager_vtable) {
-        error = "could not resolve one or more required CS2 functions or the CGameEventManager vtable";
+    std::vector<const char*> missing_functions;
+    if (!impl_->client_print) missing_functions.push_back("ClientPrint");
+    if (!impl_->client_print_all)
+        missing_functions.push_back("UTIL_ClientPrintAll");
+    if (!impl_->remove_player_item)
+        missing_functions.push_back("CBasePlayerPawn_RemovePlayerItem");
+    if (!impl_->remove_entity) missing_functions.push_back("UTIL_Remove");
+    if (!impl_->switch_team)
+        missing_functions.push_back("CCSPlayerController_SwitchTeam");
+    if (!impl_->set_pawn)
+        missing_functions.push_back("CBasePlayerController_SetPawn");
+    if (!missing_functions.empty()) {
+        std::ostringstream message;
+        message << "could not resolve required CS2 function signature(s): ";
+        for (std::size_t index = 0; index < missing_functions.size(); ++index) {
+            if (index != 0) message << ", ";
+            message << missing_functions[index];
+        }
+        error = message.str();
         return false;
     }
 
@@ -672,7 +684,10 @@ IGameEventManager2* LuaCSGameApi::event_manager() const {
 }
 
 void LuaCSGameApi::set_event_manager(IGameEventManager2* manager) {
-    if (impl_) impl_->event_manager = manager;
+    if (!impl_) return;
+    impl_->event_manager = manager;
+    impl_->event_manager_vtable =
+        manager ? *reinterpret_cast<void**>(manager) : nullptr;
 }
 
 void* LuaCSGameApi::event_manager_vtable() const {
