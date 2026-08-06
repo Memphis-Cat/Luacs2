@@ -13,14 +13,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-add_compile_options(/utf-8 /MP /wd4005)
+add_compile_options(/utf-8 /MP)
 add_compile_definitions(
     NOMINMAX
     WIN32_LEAN_AND_MEAN
     COMPILER_MSVC
     COMPILER_MSVC64
-    _WIN32
-    _WINDOWS
+    X64BITS
     _ALLOW_KEYWORD_MACROS
     __STDC_LIMIT_MACROS
     _CRT_SECURE_NO_WARNINGS=1
@@ -87,7 +86,7 @@ add_luacs_module(hud src/modules/hud/hud.cpp)
 add_luacs_module(cvars src/modules/cvars/cvars.cpp)
 add_luacs_module(teams src/modules/teams/teams.cpp)
 add_luacs_module(rounds src/modules/rounds/rounds.cpp)
-add_luacs_module(entities src/modules/entities/entities.cpp)
+add_luacs_module(entities src/modules/entities/entities_build.cpp)
 add_luacs_module(sounds src/modules/sounds/sounds.cpp)
 
 set(MMSOURCE_ROOT "${CMAKE_SOURCE_DIR}/deps/metamod-source" CACHE PATH "Metamod:Source source tree")
@@ -165,7 +164,7 @@ add_library(luacs2 SHARED
     src/plugin/plugin.h
     src/plugin/game_api.cpp
     src/plugin/game_api_players.cpp
-    src/plugin/game_api_world.cpp
+    src/plugin/game_api_world_build.cpp
     src/plugin/game_api.h
     src/plugin/game_api_internal.h
     "${HL2SDK_CS2_ROOT}/public/tier0/memoverride.cpp"
