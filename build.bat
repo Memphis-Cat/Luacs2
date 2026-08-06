@@ -39,6 +39,8 @@ call :fetch_dependency "deps\metamod-source" "https://github.com/alliedmodders/m
 call :fetch_dependency "deps\hl2sdk-cs2" "https://github.com/alliedmodders/hl2sdk.git" "7a247626c342c91808daacabb9b5c417dcbab594" "public\iserver.h" "AlliedModders HL2SDK CS2" || exit /b 1
 call :fetch_dependency "deps\protobufs" "https://github.com/SteamTracking/Protobufs.git" "7af53a5e1c95852b4394d4789e9e707cc1c8dd35" "csgo\network_connection.proto" "SteamTracking CS2 protobufs" || exit /b 1
 
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\patch-build-dependencies.ps1" || exit /b 1
+
 echo Configuring a clean MSVC x64 build...
 if exist "build" cmake -E remove_directory "build" || exit /b 1
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
