@@ -156,6 +156,16 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
     write_console("[INFO] (lua) Loaded Lua 5.5.1 native dependency from " +
                   (dll.parent_path() / "lua55.dll").string());
 
+    std::string game_api_error;
+    if (!game_api_.initialize(root, game_api_error)) {
+        const std::string message = "CS2 engine service initialization failed: " +
+                                    game_api_error;
+        write_console("[ERROR] (lua) " + message);
+        copy_error(error, maxlen, message);
+        return false;
+    }
+    write_console("[INFO] (lua) Initialized weapons, HUD, and cvar engine services.");
+
     std::string runtime_error;
     if (!runtime_.initialize(
             root, [](std::string_view text) { write_console(text); },
@@ -166,12 +176,14 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
                 g_engine->ServerCommand(owned.c_str());
             },
             runtime_error)) {
+        game_api_.shutdown();
         const std::string message =
             runtime_error.empty() ? "LuaCS initialization failed." : runtime_error;
         write_console("[ERROR] (lua) " + message);
         copy_error(error, maxlen, message);
         return false;
     }
+    runtime_.set_host_operations(game_api_.host_operations());
 
     g_SMAPI->AddListener(this, this);
     SH_ADD_HOOK(IServerGameDLL, GameFrame, g_server,
@@ -207,6 +219,7 @@ bool LuaCSPlugin::Unload(char*, size_t) {
     SH_REMOVE_HOOK(IServerGameClients, ClientCommand, g_game_clients,
                    SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
     runtime_.shutdown();
+    game_api_.shutdown();
     write_console("[INFO] (lua) LuaCS unloaded.");
     return true;
 }
