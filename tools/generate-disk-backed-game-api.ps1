@@ -1,0 +1,181 @@
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$Source,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Destination
+)
+
+$ErrorActionPreference = 'Stop'
+
+if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+    throw "game API source does not exist: $Source"
+}
+
+$sourcePath = (Resolve-Path -LiteralPath $Source).Path
+$text = [System.IO.File]::ReadAllText($sourcePath)
+
+$legacy = @'
+void* find_pattern(HMODULE module, std::string_view text) {
+    if (!module) return nullptr;
+    const auto pattern = parse_pattern(text);
+    if (pattern.empty()) return nullptr;
+
+    const auto* base = reinterpret_cast<const std::uint8_t*>(module);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return nullptr;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return nullptr;
+
+    const std::size_t image_size = nt->OptionalHeader.SizeOfImage;
+    if (image_size < pattern.size()) return nullptr;
+    for (std::size_t offset = 0; offset <= image_size - pattern.size(); ++offset) {
+        bool matches = true;
+        for (std::size_t index = 0; index < pattern.size(); ++index) {
+            if (pattern[index] >= 0 &&
+                base[offset + index] != static_cast<std::uint8_t>(pattern[index])) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) return const_cast<std::uint8_t*>(base + offset);
+    }
+    return nullptr;
+}
+'@
+
+$replacement = @'
+void* find_pattern(HMODULE module, std::string_view text) {
+    if (!module) return nullptr;
+    const auto pattern = parse_pattern(text);
+    if (pattern.empty()) return nullptr;
+
+    wchar_t module_path[32768]{};
+    const DWORD path_length = GetModuleFileNameW(
+        module, module_path, static_cast<DWORD>(std::size(module_path)));
+    if (path_length == 0 || path_length >= std::size(module_path)) {
+        return nullptr;
+    }
+
+    std::ifstream input{std::filesystem::path(module_path), std::ios::binary};
+    if (!input) return nullptr;
+    input.seekg(0, std::ios::end);
+    const std::streamoff file_size = input.tellg();
+    if (file_size <= 0 ||
+        static_cast<std::uintmax_t>(file_size) >
+            static_cast<std::uintmax_t>(
+                std::numeric_limits<std::streamsize>::max())) {
+        return nullptr;
+    }
+    input.seekg(0, std::ios::beg);
+
+    std::vector<std::uint8_t> file_bytes(static_cast<std::size_t>(file_size));
+    input.read(reinterpret_cast<char*>(file_bytes.data()),
+               static_cast<std::streamsize>(file_bytes.size()));
+    if (!input) return nullptr;
+
+    if (file_bytes.size() < sizeof(IMAGE_DOS_HEADER)) return nullptr;
+    IMAGE_DOS_HEADER dos{};
+    std::memcpy(&dos, file_bytes.data(), sizeof(dos));
+    if (dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < 0) return nullptr;
+
+    const std::size_t nt_offset = static_cast<std::size_t>(dos.e_lfanew);
+    if (nt_offset > file_bytes.size() ||
+        sizeof(IMAGE_NT_HEADERS64) > file_bytes.size() - nt_offset) {
+        return nullptr;
+    }
+
+    IMAGE_NT_HEADERS64 nt{};
+    std::memcpy(&nt, file_bytes.data() + nt_offset, sizeof(nt));
+    if (nt.Signature != IMAGE_NT_SIGNATURE ||
+        nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return nullptr;
+    }
+
+    const std::size_t sections_offset =
+        nt_offset + offsetof(IMAGE_NT_HEADERS64, OptionalHeader) +
+        nt.FileHeader.SizeOfOptionalHeader;
+    const std::size_t section_count = nt.FileHeader.NumberOfSections;
+    if (section_count == 0 ||
+        sections_offset > file_bytes.size() ||
+        section_count >
+            (file_bytes.size() - sections_offset) / sizeof(IMAGE_SECTION_HEADER)) {
+        return nullptr;
+    }
+
+    auto* live_base = reinterpret_cast<std::uint8_t*>(module);
+    for (std::size_t section_index = 0; section_index < section_count;
+         ++section_index) {
+        IMAGE_SECTION_HEADER section{};
+        std::memcpy(
+            &section,
+            file_bytes.data() + sections_offset +
+                section_index * sizeof(IMAGE_SECTION_HEADER),
+            sizeof(section));
+
+        if ((section.Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0) continue;
+
+        const std::size_t raw_offset = section.PointerToRawData;
+        std::size_t raw_size = section.SizeOfRawData;
+        if (section.Misc.VirtualSize != 0) {
+            raw_size = std::min(
+                raw_size, static_cast<std::size_t>(section.Misc.VirtualSize));
+        }
+        if (raw_offset > file_bytes.size() ||
+            raw_size > file_bytes.size() - raw_offset ||
+            raw_size < pattern.size()) {
+            continue;
+        }
+
+        const auto* section_bytes = file_bytes.data() + raw_offset;
+        for (std::size_t offset = 0; offset <= raw_size - pattern.size();
+             ++offset) {
+            bool matches = true;
+            for (std::size_t index = 0; index < pattern.size(); ++index) {
+                if (pattern[index] >= 0 &&
+                    section_bytes[offset + index] !=
+                        static_cast<std::uint8_t>(pattern[index])) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (!matches) continue;
+
+            const std::size_t rva =
+                static_cast<std::size_t>(section.VirtualAddress) + offset;
+            if (rva >= nt.OptionalHeader.SizeOfImage) return nullptr;
+            return live_base + rva;
+        }
+    }
+    return nullptr;
+}
+'@
+
+$occurrences = ([regex]::Matches($text, [regex]::Escape($legacy))).Count
+if ($occurrences -ne 1) {
+    throw "expected exactly one legacy live-image pattern scanner, found $occurrences"
+}
+
+$updated = $text.Replace($legacy, $replacement)
+if ($updated.Contains('offset <= image_size - pattern.size()')) {
+    throw 'legacy whole-image live memory scan remains after generation'
+}
+foreach ($required in @(
+    'GetModuleFileNameW',
+    'IMAGE_SCN_MEM_EXECUTE',
+    'PointerToRawData',
+    'live_base + rva'
+)) {
+    if (-not $updated.Contains($required)) {
+        throw "generated disk-backed scanner is missing '$required'"
+    }
+}
+
+$destinationDirectory = Split-Path -Parent $Destination
+[System.IO.Directory]::CreateDirectory($destinationDirectory) | Out-Null
+[System.IO.File]::WriteAllText(
+    $Destination,
+    $updated,
+    [System.Text.UTF8Encoding]::new($false))
+
+Write-Host 'Generated disk-backed executable-section scanner for CS2 server signatures.'
