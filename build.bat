@@ -53,6 +53,8 @@ if exist "build" cmake -E remove_directory "build" || exit /b 1
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\generate-disk-backed-game-api.ps1" ^
   -Source "src\plugin\game_api.cpp" ^
   -Destination "build\generated\plugin\game_api.cpp" || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\inject-signature-diagnostics.ps1" ^
+  -Path "build\generated\plugin\game_api.cpp" || exit /b 1
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
   -DCMAKE_PROJECT_INCLUDE="%CD%\tools\inject-generated-game-api.cmake" ^
@@ -63,7 +65,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "tools\fix-generated-advance
 cmake --build build --target luacs_package || exit /b 1
 
 set "BUILD_STAMP=build\package\game\csgo\addons\LuaCS\build_commit.txt"
-> "%BUILD_STAMP%" echo %BUILD_COMMIT% || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\build-stamp.ps1" ^
+  -Mode Write -StampPath "%BUILD_STAMP%" -Commit "%BUILD_COMMIT%" || exit /b 1
 echo Packaged LuaCS commit: %BUILD_COMMIT%
 
 if defined NO_DEPLOY (
