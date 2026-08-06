@@ -88,6 +88,11 @@
       "windows": 28
     }
   },
+  "CCSPlayer_WeaponServices::SelectItem": {
+    "offsets": {
+      "windows": 30
+    }
+  },
   "CCSPlayerInventory::m_pSOCache": {
     "offsets": {
       "windows": 104
