@@ -12,6 +12,28 @@ $badSource = Join-Path $luaCs "scripting\syntax_failure.lua"
 $badOutput = Join-Path $luaCs "plugins\syntax_failure.smg"
 $vdf = Join-Path $addons "metamod\luacs2.vdf"
 $advancedGamedata = Join-Path $luaCs "gamedata\reference\advanced_windows_gamedata.json"
+$advancedHeader = Join-Path $root "include\luacs\advanced_world_api.h"
+$advancedAdapter = Join-Path $root "src\plugin\game_api_advanced_build.cpp"
+$propertiesSource = Join-Path $root "src\modules\properties\properties.cpp"
+$tracesSource = Join-Path $root "src\modules\traces\traces.cpp"
+$grenadesSource = Join-Path $root "src\modules\grenades\grenades.cpp"
+
+function Assert-SourceTokens {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$Tokens
+    )
+
+    if (-not (Test-Path $Path)) {
+        throw "required source file is missing: $Path"
+    }
+    $text = Get-Content $Path -Raw
+    foreach ($token in $Tokens) {
+        if ($text -notmatch [regex]::Escape($token)) {
+            throw "source file '$Path' is missing '$token'"
+        }
+    }
+}
 
 try {
     $requiredNativeFiles = @(
@@ -39,6 +61,47 @@ try {
             throw "required native file is missing from bin\win64: $name"
         }
     }
+
+    Assert-SourceTokens $advancedHeader @(
+        "kAdvancedWorldServicesAbiVersion = 3",
+        "TraceShape::Mesh",
+        "kTraceMeshVertexCapacity",
+        "mesh_vertex_count",
+        "contents64",
+        "property_get_raw",
+        "property_collection_resize"
+    )
+    Assert-SourceTokens $advancedAdapter @(
+        "#include <ray.h>",
+        "Ray_t ray",
+        "TraceShape::Sphere",
+        "TraceShape::Capsule",
+        "TraceShape::Mesh",
+        "m_ShapeAttributes",
+        "property_get_raw_v2",
+        "property_collection_resize_v2"
+    )
+    Assert-SourceTokens $propertiesSource @(
+        '"get_raw"',
+        '"set_raw"',
+        '"collection_count"',
+        '"collection_resize"',
+        '"children"'
+    )
+    Assert-SourceTokens $tracesSource @(
+        '"sphere"',
+        '"capsule"',
+        '"mesh"',
+        '"SHAPE_MESH"',
+        '"contents64"',
+        '"shape_collision_function_mask"'
+    )
+    Assert-SourceTokens $grenadesSource @(
+        "thrower_entity_index",
+        "bounce_count",
+        "smoke_effect_tick",
+        "bounce_sound"
+    )
 
     if (-not (Test-Path $advancedGamedata)) {
         throw "advanced Windows gamedata was not packaged"
@@ -100,7 +163,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package and compiler smoke tests passed."
+    Write-Host "LuaCS package, ABI v3 surface, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
