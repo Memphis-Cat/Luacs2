@@ -11,6 +11,28 @@ if not exist "%PACKAGE%\LuaCS\bin\win64\luacs2.dll" (
   echo ERROR: Build output is missing. Run build.bat first.
   exit /b 1
 )
+if not exist "%PACKAGE%\LuaCS\build_commit.txt" (
+  echo ERROR: Build commit stamp is missing.
+  echo        Run build.bat --no-deploy before deploying.
+  exit /b 1
+)
+
+set "BUILT_COMMIT="
+set /p BUILT_COMMIT=<"%PACKAGE%\LuaCS\build_commit.txt"
+set "CURRENT_COMMIT="
+for /f "delims=" %%H in ('git rev-parse HEAD 2^>nul') do set "CURRENT_COMMIT=%%H"
+if not defined CURRENT_COMMIT (
+  echo ERROR: Could not resolve the current Git commit.
+  exit /b 1
+)
+if /I not "%BUILT_COMMIT%"=="%CURRENT_COMMIT%" (
+  echo ERROR: Refusing to deploy a stale LuaCS package.
+  echo        Package was built from: %BUILT_COMMIT%
+  echo        Current source commit:  %CURRENT_COMMIT%
+  echo        Run build.bat --no-deploy, then deploy again.
+  exit /b 1
+)
+
 if not exist "%GAME_ROOT%\addons\metamod" (
   echo ERROR: Metamod folder was not found at "%GAME_ROOT%\addons\metamod".
   exit /b 1
@@ -31,6 +53,8 @@ if exist "%CSS_GAMEDATA%" (
   echo          LuaCS will use its packaged Windows gamedata snapshot.
 )
 
+echo LuaCS deployed commit:
+echo   %BUILT_COMMIT%
 echo LuaCS deployed to:
 echo   %GAME_ROOT%\addons\LuaCS
 echo Metamod descriptor:
