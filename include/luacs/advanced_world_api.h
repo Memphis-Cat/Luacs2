@@ -7,13 +7,16 @@
 
 namespace luacs {
 
-inline constexpr std::uint32_t kAdvancedWorldServicesAbiVersion = 1;
+inline constexpr std::uint32_t kAdvancedWorldServicesAbiVersion = 2;
 inline constexpr std::size_t kPropertyNameCapacity = 192;
 inline constexpr std::size_t kPropertyTypeCapacity = 96;
 inline constexpr std::size_t kPropertyStringCapacity = 512;
+inline constexpr std::size_t kPropertyRawCapacity = 4096;
+inline constexpr std::size_t kTraceIgnoreCapacity = 64;
 
-// Values supported by the generic schema bridge. Unsupported schema types are
-// reported explicitly; they are never reinterpreted as a different type.
+// Unsupported schema representations are reported explicitly. They are never
+// silently reinterpreted as a different type. Raw access is available through
+// the dedicated bounded raw callbacks below.
 enum class PropertyKind : std::uint8_t {
     Invalid,
     Boolean,
@@ -25,6 +28,7 @@ enum class PropertyKind : std::uint8_t {
     Angle,
     EntityHandle,
     Pointer,
+    Raw,
 };
 
 struct PropertyValue {
@@ -40,6 +44,11 @@ struct PropertyValue {
     char string_value[kPropertyStringCapacity]{};
 };
 
+struct RawPropertyValue {
+    std::size_t size{};
+    std::uint8_t bytes[kPropertyRawCapacity]{};
+};
+
 struct PropertyInfo {
     bool valid{};
     bool networked{};
@@ -50,9 +59,27 @@ struct PropertyInfo {
     PropertyKind kind{PropertyKind::Invalid};
     char name[kPropertyNameCapacity]{};
     char type_name[kPropertyTypeCapacity]{};
+
+    // ABI v2 metadata appended after the v1 layout.
+    bool readable{};
+    bool fixed_array{};
+    bool collection{};
+    bool pointer{};
+    bool embedded_class{};
+    std::uint32_t byte_size{};
+    int selected_index{-1};
+    char owner_class[kPropertyTypeCapacity]{};
+};
+
+enum class TraceShape : std::uint8_t {
+    Line = 0,
+    Sphere = 1,
+    Hull = 2,
+    Capsule = 3,
 };
 
 struct TraceRequest {
+    // ABI v1 fields remain first.
     Vector3 start{};
     Vector3 end{};
     Vector3 mins{};
@@ -63,9 +90,28 @@ struct TraceRequest {
     int ignore_entity_index{-1};
     bool use_hull{};
     bool hit_triggers{};
+
+    // ABI v2 shape and filter controls.
+    TraceShape shape{TraceShape::Line};
+    Vector3 center_a{};
+    Vector3 center_b{};
+    float radius{};
+    std::uint64_t contents{};
+    std::uint64_t interacts_with{};
+    std::uint64_t interacts_exclude{0x20311ull};
+    std::uint64_t interacts_as{0x40000ull};
+    bool hit_solid{true};
+    bool ignore_disabled_pairs{true};
+    bool ignore_if_both_hitboxes{};
+    bool force_hit_everything{};
+    bool iterate_entities{true};
+    bool hit_entities{true};
+    std::size_t ignore_count{};
+    int ignore_entities[kTraceIgnoreCapacity]{};
 };
 
 struct TraceResult {
+    // ABI v1 fields remain first.
     bool valid{};
     bool hit{};
     bool start_solid{};
@@ -84,6 +130,14 @@ struct TraceResult {
     int surface_flags{};
     int contents{};
     char surface_name[128]{};
+
+    // ABI v2 result data.
+    float distance{};
+    float hit_offset{};
+    int triangle{-1};
+    int bone{-1};
+    bool exact_hit_point{};
+    TraceShape shape{TraceShape::Line};
 };
 
 enum class GrenadeType : std::uint8_t {
@@ -94,9 +148,11 @@ enum class GrenadeType : std::uint8_t {
     Molotov,
     Incendiary,
     Decoy,
+    Inferno,
 };
 
 struct GrenadeInfo {
+    // ABI v1 fields remain first.
     bool valid{};
     GrenadeType type{GrenadeType::Unknown};
     int entity_index{-1};
@@ -110,6 +166,15 @@ struct GrenadeInfo {
     Vector3 position{};
     Vector3 velocity{};
     char classname[128]{};
+
+    // ABI v2 grenade state.
+    int thrower_entity_index{-1};
+    int team{};
+    int bounce_count{};
+    int fire_count{};
+    float lifetime{};
+    float smoke_effect_tick{};
+    bool bounce_sound{};
 };
 
 struct GrenadeSpawnRequest {
@@ -127,6 +192,7 @@ struct AdvancedWorldServices {
     std::uint32_t abi_version{kAdvancedWorldServicesAbiVersion};
     void* context{};
 
+    // ABI v1 callbacks.
     bool (*property_info)(void*, int entity_index, const char* property,
                           PropertyInfo*, char*, std::size_t){};
     bool (*property_get)(void*, int entity_index, const char* property,
@@ -150,6 +216,26 @@ struct AdvancedWorldServices {
                           char*, std::size_t){};
     bool (*grenade_detonate)(void*, int entity_index, char*, std::size_t){};
     bool (*grenade_remove)(void*, int entity_index, char*, std::size_t){};
+
+    // ABI v2 bounded raw and dynamic-collection operations.
+    bool (*property_get_raw)(void*, int entity_index, const char* property,
+                             int array_index, RawPropertyValue*, PropertyInfo*,
+                             char*, std::size_t){};
+    bool (*property_set_raw)(void*, int entity_index, const char* property,
+                             int array_index, const RawPropertyValue*,
+                             bool network, char*, std::size_t){};
+    std::size_t (*property_collection_count)(void*, int entity_index,
+                                             const char* property, char*,
+                                             std::size_t){};
+    bool (*property_collection_resize)(void*, int entity_index,
+                                       const char* property, std::size_t count,
+                                       bool network, char*, std::size_t){};
+    std::size_t (*property_child_count)(void*, int entity_index,
+                                        const char* property, bool inherited,
+                                        char*, std::size_t){};
+    bool (*property_child_at)(void*, int entity_index, const char* property,
+                              bool inherited, std::size_t index, PropertyInfo*,
+                              char*, std::size_t){};
 };
 
 } // namespace luacs
