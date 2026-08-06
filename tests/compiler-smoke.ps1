@@ -13,6 +13,12 @@ $badOutput = Join-Path $luaCs "plugins\syntax_failure.smg"
 $vdf = Join-Path $addons "metamod\luacs2.vdf"
 $advancedGamedata = Join-Path $luaCs "gamedata\reference\advanced_windows_gamedata.json"
 $cmakeFile = Join-Path $root "CMakeLists.txt"
+$gameApiSource = Join-Path $root "src\plugin\game_api.cpp"
+$pluginSource = Join-Path $root "src\plugin\plugin.cpp"
+$runtimeHeader = Join-Path $root "src\runtime\runtime.h"
+$runtimeSource = Join-Path $root "src\runtime\runtime.cpp"
+$runtimeEvents = Join-Path $root "src\runtime\runtime_events.cpp"
+$exampleSource = Join-Path $root "packaging\LuaCS\scripting\example_welcome.lua"
 $advancedHeader = Join-Path $root "include\luacs\advanced_world_api.h"
 $advancedAdapter = Join-Path $root "src\plugin\game_api_advanced_build.cpp"
 $advancedComplete = Join-Path $root "src\plugin\game_api_advanced_complete_build.cpp"
@@ -103,6 +109,66 @@ try {
         "std::array<std::byte, 40> data{};",
         "static_assert(sizeof(NativeRay) == 44);"
     )
+
+    Assert-SourceTokens $gameApiSource @(
+        "missing_functions",
+        "could not resolve required CS2 function signature(s):",
+        "manager ? *reinterpret_cast<void**>(manager) : nullptr"
+    )
+    Assert-SourceOmits $gameApiSource @(
+        "could not resolve one or more required CS2 functions or the CGameEventManager vtable"
+    )
+    Assert-SourceTokens $pluginSource @(
+        "GET_V_IFACE_CURRENT(GetEngineFactory, g_game_events, IGameEventManager2",
+        "ConCommand g_lua_command",
+        "META_REGCVAR(&g_lua_command)",
+        "META_UNREGCVAR(&g_lua_command)",
+        "IGameEventManager2::FireEvent pre/post hooks"
+    )
+    Assert-SourceOmits $pluginSource @(
+        "SH_ADD_DVPHOOK"
+    )
+    Assert-SourceTokens $runtimeHeader @(
+        'kLuaCSVersion = "0.5.0"',
+        "struct PluginMetadata",
+        "plugin_metadata_cache_",
+        "plugin_failures_",
+        "read_plugin_metadata"
+    )
+    Assert-SourceTokens $runtimeSource @(
+        "read_plugin_metadata(*vm)",
+        'lua_getglobal(vm.state, "plugin")',
+        'read_field("name", 256)',
+        'read_field("author", 256)',
+        'read_field("version", 128)',
+        'read_field("description", 1024)',
+        "plugin_failures_[key]"
+    )
+    Assert-SourceTokens $runtimeEvents @(
+        'section == "clear"',
+        'section == "version"',
+        'action == "list"',
+        'action == "info"',
+        'action == "load"',
+        'action == "unload"',
+        'action == "refresh"',
+        'action == "retry"',
+        'action == "force_load"',
+        'action == "force_unload"',
+        'lua_getglobal(vm.state, "OnUnload")',
+        'lua_getfield(vm.state, plugin_table, "unload")',
+        '"source alias: "',
+        '"Last error: "'
+    )
+    Assert-SourceTokens $exampleSource @(
+        "plugin = {",
+        'name = "Welcome Example"',
+        'author = "Memphis-Cat"',
+        'version = "1.0.0"',
+        "description =",
+        "function plugin:unload()"
+    )
+
     Assert-SourceTokens $advancedHeader @(
         "kAdvancedWorldServicesAbiVersion = 3",
         "Mesh = 4",
@@ -250,7 +316,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, real Ray_t resolver, schema-native grenades, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
+    Write-Host "LuaCS package, live game-event interface, lua admin commands, plugin metadata/lifecycle, real Ray_t resolver, schema-native grenades, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
