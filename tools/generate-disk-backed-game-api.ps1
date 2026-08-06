@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
 }
 
 $sourcePath = (Resolve-Path -LiteralPath $Source).Path
-$text = [System.IO.File]::ReadAllText($sourcePath)
+$text = [System.IO.File]::ReadAllText($sourcePath).Replace("`r`n", "`n")
 
 $legacy = @'
 void* find_pattern(HMODULE module, std::string_view text) {
@@ -43,6 +43,7 @@ void* find_pattern(HMODULE module, std::string_view text) {
     return nullptr;
 }
 '@
+$legacy = $legacy.Replace("`r`n", "`n")
 
 $replacement = @'
 void* find_pattern(HMODULE module, std::string_view text) {
@@ -51,9 +52,11 @@ void* find_pattern(HMODULE module, std::string_view text) {
     if (pattern.empty()) return nullptr;
 
     wchar_t module_path[32768]{};
-    const DWORD path_length = GetModuleFileNameW(
-        module, module_path, static_cast<DWORD>(std::size(module_path)));
-    if (path_length == 0 || path_length >= std::size(module_path)) {
+    constexpr DWORD module_path_capacity = static_cast<DWORD>(
+        sizeof(module_path) / sizeof(module_path[0]));
+    const DWORD path_length =
+        GetModuleFileNameW(module, module_path, module_path_capacity);
+    if (path_length == 0 || path_length >= module_path_capacity) {
         return nullptr;
     }
 
@@ -143,13 +146,17 @@ void* find_pattern(HMODULE module, std::string_view text) {
 
             const std::size_t rva =
                 static_cast<std::size_t>(section.VirtualAddress) + offset;
-            if (rva >= nt.OptionalHeader.SizeOfImage) return nullptr;
+            if (rva >=
+                static_cast<std::size_t>(nt.OptionalHeader.SizeOfImage)) {
+                return nullptr;
+            }
             return live_base + rva;
         }
     }
     return nullptr;
 }
 '@
+$replacement = $replacement.Replace("`r`n", "`n")
 
 $occurrences = ([regex]::Matches($text, [regex]::Escape($legacy))).Count
 if ($occurrences -ne 1) {
