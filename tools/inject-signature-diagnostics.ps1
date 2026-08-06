@@ -61,9 +61,9 @@ $replacement = @'
         std::ostringstream detail;
         detail << name << " [pattern-bytes=" << parsed_pattern.size()
                << "; scanner="
-               << (g_pattern_scan_diagnostic.empty()
+               << (luacs_game_internal::g_pattern_scan_diagnostic.empty()
                        ? "no scanner diagnostic was produced"
-                       : g_pattern_scan_diagnostic)
+                       : luacs_game_internal::g_pattern_scan_diagnostic)
                << "]";
         signature_diagnostics.push_back(detail.str());
     };
@@ -132,7 +132,7 @@ $replacement = @'
 $updated = $text.Substring(0, $start) + $replacement + $text.Substring($end)
 foreach ($required in @(
     'Signature scan diagnostics:',
-    'g_pattern_scan_diagnostic',
+    'luacs_game_internal::g_pattern_scan_diagnostic',
     'pattern-bytes=',
     'Gamedata directory:',
     'record_signature("ClientPrint"',
