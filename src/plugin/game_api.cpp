@@ -49,7 +49,7 @@ std::optional<std::string> entry_windows_value(const std::string& json,
     const auto maximum = std::min(json.size(), position + 8192);
     const std::string block = json.substr(position, maximum - position);
     const std::regex expression(
-        R"("windows"\s*:\s*(?:"([^"]+)"|([0-9]+)))",
+        "\"windows\"\\s*:\\s*(?:\"([^\"]+)\"|([0-9]+))",
         std::regex::ECMAScript);
     std::smatch match;
     if (!std::regex_search(block, match, expression)) return std::nullopt;
@@ -71,7 +71,7 @@ std::optional<std::size_t> entry_windows_number(const std::string& json,
 
 std::vector<int> parse_pattern(std::string_view text) {
     std::vector<int> pattern;
-    std::istringstream input(std::string(text));
+    std::istringstream input{std::string(text)};
     std::string token;
     while (input >> token) {
         if (token == "?" || token == "??") {
