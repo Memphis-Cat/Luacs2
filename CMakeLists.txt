@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.26)
-project(LuaCS VERSION 0.1.0 LANGUAGES C CXX)
+project(LuaCS VERSION 0.2.0 LANGUAGES C CXX)
 
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "LuaCS currently targets 64-bit Windows CS2 servers only.")
@@ -82,6 +82,9 @@ add_luacs_module(timers src/modules/timers/timers.cpp)
 add_luacs_module(players src/modules/players/players.cpp)
 add_luacs_module(commands src/modules/commands/commands.cpp)
 add_luacs_module(math src/modules/math/math.cpp)
+add_luacs_module(weapons src/modules/weapons/weapons.cpp)
+add_luacs_module(hud src/modules/hud/hud.cpp)
+add_luacs_module(cvars src/modules/cvars/cvars.cpp)
 
 set(MMSOURCE_ROOT "${CMAKE_SOURCE_DIR}/deps/metamod-source" CACHE PATH "Metamod:Source source tree")
 set(HL2SDK_CS2_ROOT "${CMAKE_SOURCE_DIR}/deps/hl2sdk-cs2" CACHE PATH "AlliedModders HL2SDK CS2 tree")
@@ -156,6 +159,8 @@ target_link_libraries(luacs_runtime PUBLIC lua55 luacs_common)
 add_library(luacs2 SHARED
     src/plugin/plugin.cpp
     src/plugin/plugin.h
+    src/plugin/game_api.cpp
+    src/plugin/game_api.h
     "${HL2SDK_CS2_ROOT}/public/tier0/memoverride.cpp"
     "${HL2SDK_CS2_ROOT}/tier1/convar.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook.cpp"
@@ -226,4 +231,5 @@ add_custom_target(luacs_package ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/gamedata/reference"
         "${LUACS_ROOT}/gamedata/reference"
-    DEPENDS luacs2 luacs_compile events timers players commands math lua55 lua55_static)
+    DEPENDS luacs2 luacs_compile events timers players commands math weapons hud cvars
+            lua55 lua55_static)
