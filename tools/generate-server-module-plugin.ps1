@@ -31,6 +31,31 @@ if ($includeOccurrences -ne 1) {
 }
 $text = $text.Replace($includeMarker, $includeReplacement)
 
+$errorLogMarker = @'
+    g_native_error_log = root / "logs" / "luacs-errors.log";
+'@.Replace("`r`n", "`n")
+$errorLogReplacement = @'
+    g_native_error_log = root / "logs" / "luacs-errors.log";
+    {
+        std::error_code reset_error;
+        std::filesystem::remove(g_native_error_log, reset_error);
+        if (reset_error) {
+            std::ofstream clear_error_log(g_native_error_log,
+                                          std::ios::trunc);
+        }
+    }
+'@.Replace("`r`n", "`n")
+
+$errorLogOccurrences = ([regex]::Matches(
+    $text,
+    [regex]::Escape($errorLogMarker))).Count
+if ($errorLogOccurrences -ne 1) {
+    throw (
+        "expected exactly one native error log marker, found " +
+        $errorLogOccurrences)
+}
+$text = $text.Replace($errorLogMarker, $errorLogReplacement)
+
 $initializationMarker = @'
     std::string game_api_error;
     if (!game_api_.initialize(root, game_api_error)) {
@@ -63,6 +88,8 @@ $text = $text.Replace($initializationMarker, $initializationReplacement)
 
 foreach ($required in @(
     '#include "server_module.h"',
+    'std::filesystem::remove(g_native_error_log, reset_error)',
+    'std::ofstream clear_error_log(g_native_error_log',
     'LuaCSBindGameServerModule(g_server, server_module_error)',
     'CS2 game server module binding failed:',
     'Bound actual CS2 game server module:',
@@ -74,15 +101,20 @@ foreach ($required in @(
     }
 }
 
+$resetIndex = $text.IndexOf(
+    'std::filesystem::remove(g_native_error_log, reset_error)',
+    [System.StringComparison]::Ordinal)
 $bindIndex = $text.IndexOf(
     'LuaCSBindGameServerModule(g_server, server_module_error)',
     [System.StringComparison]::Ordinal)
 $initializeIndex = $text.IndexOf(
     'game_api_.initialize(root, game_api_error)',
     [System.StringComparison]::Ordinal)
-if ($bindIndex -lt 0 -or $initializeIndex -lt 0 -or
-    $bindIndex -ge $initializeIndex) {
-    throw "game server module binding must happen before game API initialization"
+if ($resetIndex -lt 0 -or $bindIndex -lt 0 -or $initializeIndex -lt 0 -or
+    $resetIndex -ge $bindIndex -or $bindIndex -ge $initializeIndex) {
+    throw (
+        "native error log reset and game server module binding must happen " +
+        "before game API initialization")
 }
 
 $destinationDirectory = Split-Path -Parent $Destination
@@ -92,4 +124,6 @@ $destinationDirectory = Split-Path -Parent $Destination
     $text,
     [System.Text.UTF8Encoding]::new($false))
 
-Write-Host 'Generated plugin source with live CS2 server module binding.'
+Write-Host (
+    'Generated plugin source with current-session error logging and live ' +
+    'CS2 server module binding.')
