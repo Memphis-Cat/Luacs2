@@ -250,7 +250,8 @@ LuaCS uses the pinned CS2 SDK `Ray_t` constructors directly. All five Source 2 q
 local traces = require("cs2.traces")
 
 local line = traces.line(start_pos, end_pos, options)
-local sphere = traces.sphere(start_pos, end_pos, radius, options)
+local sphere = traces.sphere(
+    start_pos, end_pos, center_offset, radius, options)
 local hull = traces.hull(start_pos, end_pos, mins, maxs, options)
 local capsule = traces.capsule(
     start_pos, end_pos, center_a, center_b, radius, options)
@@ -267,7 +268,7 @@ local generic = traces.cast({
 })
 ```
 
-Shape constants:
+Shape and capacity constants:
 
 ```text
 SHAPE_LINE
@@ -275,6 +276,19 @@ SHAPE_SPHERE
 SHAPE_HULL
 SHAPE_CAPSULE
 SHAPE_MESH
+MAX_IGNORE_ENTITIES = 64
+MAX_MESH_VERTICES = 256
+```
+
+Source 2 query-object constants:
+
+```text
+OBJECTS_STATIC = 1
+OBJECTS_KEYFRAMED = 2
+OBJECTS_DYNAMIC = 4
+OBJECTS_LOCATABLE = 8
+OBJECTS_ALL_GAME_ENTITIES = 14
+OBJECTS_ALL = 15
 ```
 
 Options:
@@ -284,7 +298,7 @@ mask / contents / interacts_with     64-bit interaction mask
 interacts_as                         query interaction identity
 interacts_exclude                    excluded interaction layers
 collision_group                      0 through 255
-object_set_mask                      Source 2 query-object set
+object_set_mask                      one or more OBJECTS_* bits
 hit_solid                            include solid shapes
 hit_solid_requires_generate_contacts require solid-contact generation
 hit_triggers                         include triggers
@@ -297,13 +311,13 @@ included_detail_layers               16-bit detail-layer mask
 target_detail_layer                  0 through 255
 ignore                               entity, entity index, or array
 ignore_entities                      additional ignored entities
-center / center_a / center_b          shape-local offsets
+center / center_a / center_b         shape-local offsets
 radius                               sphere/capsule radius
 mins / maxs                          hull/mesh bounds
 vertices                             mesh vertices
 ```
 
-Up to `MAX_IGNORE_ENTITIES` (64) distinct entities and `MAX_MESH_VERTICES` (256) vertices are accepted. Every ignored index is validated; it is not silently dropped after Source 2's two built-in pass-entity slots. Additional ignores are enforced by `CTraceFilter::ShouldHitEntity`.
+Up to `MAX_IGNORE_ENTITIES` distinct entities and `MAX_MESH_VERTICES` vertices are accepted. Every ignored index is validated; it is not silently dropped after Source 2's two built-in pass-entity slots. Additional ignores are enforced by `CTraceFilter::ShouldHitEntity`. Object-set bits outside `OBJECTS_ALL` are rejected instead of being truncated to a byte.
 
 Results include the normal hit fields plus the stable Source 2 physics result data:
 
@@ -322,9 +336,9 @@ shape_target_detail_layer, shape_collision_group
 shape_collision_function_mask
 ```
 
-`fraction_left_solid_available` is `false` because Source 2 `CGameTrace` does not expose the Source 1 `fractionleftsolid` member. LuaCS keeps the legacy field at zero for ABI compatibility and explicitly marks it unavailable instead of inventing a value.
+`fraction_left_solid_available` is `false` because Source 2 `CGameTrace` does not expose the Source 1 `fractionleftsolid` member. LuaCS keeps the legacy field at zero for ABI compatibility and explicitly marks it unavailable instead of inventing a value. `all_solid` is a compatibility derivation from `start_solid` and a zero fraction; Source 2 does not provide a separate native all-solid field.
 
-Every vector and scalar is checked for finite values. Degenerate hulls, capsules, meshes, zero/negative radii, invalid collision groups, invalid ignored entities, and oversized arrays return an error before calling the engine.
+Every vector and scalar is checked for finite values. Degenerate hulls, capsules, meshes, zero/negative radii, invalid collision groups, unsupported object-set bits, invalid ignored entities, and oversized arrays return an error before calling the engine.
 
 ## Grenades
 
@@ -391,6 +405,8 @@ Creation is transactional. If validation, teleporting, ownership, thrower assign
 Player slots are resolved by enumerating live player-controller entities and their pawn handles. The old assumption that controller entity index always equals `slot + 1` is used only as a validated compatibility fallback when the current schema does not expose a player-slot field.
 
 Projectile fuse scheduling uses the real delayed `Detonate` entity input. Inferno is an active fire effect rather than a projectile: it supports inspection, enumeration, direct creation, extinguishing/removal, but rejects projectile fuse scheduling with an explicit error. Calling `detonate` on an inferno first attempts `Extinguish`, then removes it if the engine does not expose that input.
+
+Molotov and Incendiary use the real shared `molotov_projectile` class. Incendiary is distinguished by the live `CMolotovProjectile::m_bIsIncGrenade` schema field, which LuaCS sets before spawning and reads when enumerating or inspecting projectiles.
 
 ## Validation boundary
 
