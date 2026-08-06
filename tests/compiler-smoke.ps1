@@ -97,29 +97,38 @@ try {
     Assert-SourceTokens $gameApiSource @(
         "missing_functions",
         "could not resolve required CS2 function signature(s):",
+        "find_virtual_table(server_module",
+        '"CGameEventManager"',
         "manager ? *reinterpret_cast<void**>(manager) : nullptr"
     )
     Assert-SourceOmits $gameApiSource @(
         "could not resolve one or more required CS2 functions or the CGameEventManager vtable"
     )
     Assert-SourceTokens $pluginHeader @(
-        "INTERFACEVERSION_GAMEEVENTSMANAGER2",
-        '"GAMEEVENTSMANAGER002"'
+        "Hook_LoadEventsFromFile",
+        "load_events_hook_id_"
     )
     Assert-SourceTokens $pluginSource @(
-        "GET_V_IFACE_CURRENT(GetEngineFactory, g_game_events, IGameEventManager2",
+        "SH_DECL_HOOK2(IGameEventManager2, LoadEventsFromFile",
+        "game_api_.event_manager_vtable()",
+        "SH_ADD_DVPHOOK(",
+        "Hook_LoadEventsFromFile",
         "ConCommand g_lua_command",
         "META_CONVAR_REGISTER(FCVAR_RELEASE)",
         "g_SMAPI->UnregisterConCommand(g_PLAPI, &g_lua_command)",
         "ConVar_Unregister()",
         "failed_hooks",
+        "load_events_hook_id_ <= 0",
         "fire_event_pre_hook_id_ <= 0",
         "client_command_hook_id_ <= 0",
+        "Captured the live IGameEventManager2 instance.",
         "Could not install required Source 2 hook(s):",
-        "Installed all 8 required Source 2 hooks."
+        "Installed all 9 required Source 2 hooks."
     )
     Assert-SourceOmits $pluginSource @(
-        "SH_ADD_DVPHOOK", "META_REGCVAR", "META_UNREGCVAR"
+        "GET_V_IFACE_CURRENT(GetEngineFactory, g_game_events",
+        "INTERFACEVERSION_GAMEEVENTSMANAGER2",
+        "META_REGCVAR", "META_UNREGCVAR"
     )
 
     Assert-SourceTokens $runtimeHeader @(
@@ -271,7 +280,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, live game-event interface, all eight required Source 2 hooks, Source 2 lua command registration, plugin metadata/lifecycle, real Ray_t resolver, schema-native grenades, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
+    Write-Host "LuaCS package, live game-event manager capture, all nine required Source 2 hooks, Source 2 lua command registration, plugin metadata/lifecycle, real Ray_t resolver, schema-native grenades, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
