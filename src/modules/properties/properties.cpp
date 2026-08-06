@@ -7,6 +7,7 @@ extern "C" {
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 namespace {
 
