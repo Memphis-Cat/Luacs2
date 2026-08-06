@@ -400,16 +400,18 @@ bounce_count, bounce_sound
 fire_count, smoke_effect_tick
 ```
 
-Creation is transactional. If validation, teleporting, ownership, thrower assignment, spawning, fuse scheduling, or final inspection fails, the newly created entity is removed. A failed call cannot leave an orphan projectile behind.
+Creation is transactional. If validation, teleporting, ownership, thrower assignment, schema initialization, spawning, fuse scheduling, or final inspection fails, the newly created entity is removed. A failed call cannot leave an orphan projectile behind.
 
 Player slots are resolved by enumerating live player-controller entities and their pawn handles. The old assumption that controller entity index always equals `slot + 1` is used only as a validated compatibility fallback when the current schema does not expose a player-slot field.
 
-Projectile fuse scheduling uses the real delayed `Detonate` entity input. Inferno is an active fire effect rather than a projectile: it supports inspection, enumeration, direct creation, extinguishing/removal, but rejects projectile fuse scheduling with an explicit error. Calling `detonate` on an inferno first attempts `Extinguish`, then removes it if the engine does not expose that input.
+Projectile creation initializes the current CS2 schema fields for initial position, initial velocity, original spawn location, live state, bounce count, detonation-recorded state, owner, both thrower handles, and team. Fuse scheduling reads the engine-populated `m_flSpawnTime` after spawn and writes the absolute `m_flDetonateTime`; immediate detonation writes a due detonation time instead of assuming a projectile `Detonate` input exists. Integer schema values are written with their exact signedness and byte width, with overflow rejected rather than truncated.
 
-Molotov and Incendiary use the real shared `molotov_projectile` class. Incendiary is distinguished by the live `CMolotovProjectile::m_bIsIncGrenade` schema field, which LuaCS sets before spawning and reads when enumerating or inspecting projectiles.
+Inferno is an active fire effect rather than a projectile: it supports inspection, enumeration, direct creation, extinguishing/removal, but rejects projectile fuse scheduling with an explicit error. Calling `detonate` on an inferno first attempts `Extinguish`, then removes it if the engine does not expose that input. Inferno lifetime comes from `m_nFireLifetime`.
+
+Molotov and Incendiary use the real shared `molotov_projectile` class. Incendiary is distinguished by the live `CMolotovProjectile::m_bIsIncGrenade` schema field, which LuaCS sets before spawning and reads when enumerating or inspecting projectiles. Their exploded state also reads the authoritative `m_bDetonated` field.
 
 ## Validation boundary
 
-The Windows x64 CI build compiles all modules and the native Metamod plugin with MSVC warnings treated as errors (`/WX`). Package and compiler smoke tests verify every DLL is present and that SMG compilation, caching, corruption recovery, and syntax-failure preservation work.
+The Windows x64 CI build compiles all modules and the native Metamod plugin with MSVC warnings treated as errors (`/WX`). Package and compiler smoke tests verify every DLL is present, verify that the compiled resolver uses the real SDK `Ray_t`, verify the selected ABI v3/schema-native adapter chain, and verify that SMG compilation, caching, corruption recovery, and syntax-failure preservation work.
 
 CI cannot prove live CS2 behavior. Teams, rounds, entities, sounds, properties, traces, and grenades still require testing on a current Windows CS2 dedicated server with a loaded map. Engine operations return explicit errors when interfaces, schema fields, signatures, entities, recipients, game rules, ray inputs, or entity inputs are unavailable.
