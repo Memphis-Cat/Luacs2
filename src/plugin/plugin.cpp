@@ -164,7 +164,10 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         copy_error(error, maxlen, message);
         return false;
     }
-    write_console("[INFO] (lua) Initialized weapons, HUD, and cvar engine services.");
+    if (!game_api_error.empty()) {
+        write_console("[WARN] (lua) " + game_api_error);
+    }
+    write_console("[INFO] (lua) Initialized HUD and cvar services; entity-backed operations resolve lazily.");
 
     std::string runtime_error;
     if (!runtime_.initialize(
