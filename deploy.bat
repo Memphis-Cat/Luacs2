@@ -7,7 +7,7 @@ if not defined GAME_ROOT set "GAME_ROOT=%LUACS_GAME_ROOT%"
 if not defined GAME_ROOT set "GAME_ROOT=F:\steamcmd2\steamapps\common\Counter-Strike Global Offensive\game\csgo"
 
 set "PACKAGE=%CD%\build\package\game\csgo\addons"
-if not exist "%PACKAGE%\LuaCS\bin\luacs2.dll" (
+if not exist "%PACKAGE%\LuaCS\bin\win64\luacs2.dll" (
   echo ERROR: Build output is missing. Run build.bat first.
   exit /b 1
 )
