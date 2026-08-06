@@ -16,6 +16,7 @@ $cmakeFile = Join-Path $root "CMakeLists.txt"
 $advancedHeader = Join-Path $root "include\luacs\advanced_world_api.h"
 $advancedAdapter = Join-Path $root "src\plugin\game_api_advanced_build.cpp"
 $advancedComplete = Join-Path $root "src\plugin\game_api_advanced_complete_build.cpp"
+$advancedFinal = Join-Path $root "src\plugin\game_api_advanced_final_build.cpp"
 $propertiesSource = Join-Path $root "src\modules\properties\properties.cpp"
 $tracesSource = Join-Path $root "src\modules\traces\traces.cpp"
 $grenadesSource = Join-Path $root "src\modules\grenades\grenades.cpp"
@@ -65,7 +66,7 @@ try {
     }
 
     Assert-SourceTokens $cmakeFile @(
-        "src/plugin/game_api_advanced_complete_build.cpp",
+        "src/plugin/game_api_advanced_final_build.cpp",
         "add_luacs_module(traces src/modules/traces/traces.cpp)"
     )
     Assert-SourceTokens $advancedHeader @(
@@ -96,6 +97,14 @@ try {
         "grenade_spawn_complete",
         "services.trace = &trace_complete",
         "services.grenade_spawn = &grenade_spawn_complete"
+    )
+    Assert-SourceTokens $advancedFinal @(
+        '#include "game_api_advanced_complete_build.cpp"',
+        "m_bIsIncGrenade",
+        '"molotov_projectile"',
+        "grenade_spawn_incendiary",
+        "grenade_spawn_final",
+        "services.grenade_spawn = &grenade_spawn_final"
     )
     Assert-SourceTokens $propertiesSource @(
         '"get_raw"',
@@ -179,7 +188,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, compiled ABI v3 adapters, Lua modules, and compiler smoke tests passed."
+    Write-Host "LuaCS package, final ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
