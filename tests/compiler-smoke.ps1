@@ -107,7 +107,11 @@ try {
         "META_CONVAR_REGISTER(FCVAR_RELEASE)",
         "g_SMAPI->UnregisterConCommand(g_PLAPI, &g_lua_command)",
         "ConVar_Unregister()",
-        "IGameEventManager2::FireEvent pre/post hooks"
+        "failed_hooks",
+        "fire_event_pre_hook_id_ <= 0",
+        "client_command_hook_id_ <= 0",
+        "Could not install required Source 2 hook(s):",
+        "Installed all 8 required Source 2 hooks."
     )
     Assert-SourceOmits $pluginSource @(
         "SH_ADD_DVPHOOK", "META_REGCVAR", "META_UNREGCVAR"
@@ -262,7 +266,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, live game-event interface, Source 2 lua command registration, plugin metadata/lifecycle, real Ray_t resolver, schema-native grenades, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
+    Write-Host "LuaCS package, live game-event interface, all eight required Source 2 hooks, Source 2 lua command registration, plugin metadata/lifecycle, real Ray_t resolver, schema-native grenades, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
