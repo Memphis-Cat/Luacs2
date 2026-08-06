@@ -52,7 +52,7 @@ public:
     }
     const char* GetLicense() override { return "MIT"; }
     const char* GetVersion() override {
-        return "0.3.0-player-events-inventory";
+        return "0.4.0-teams-entities-sounds";
     }
     const char* GetDate() override { return __DATE__; }
     const char* GetLogTag() override { return "LUACS"; }
