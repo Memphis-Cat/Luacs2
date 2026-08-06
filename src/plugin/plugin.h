@@ -1,9 +1,5 @@
 #pragma once
 
-#ifndef INTERFACEVERSION_GAMEEVENTSMANAGER2
-#define INTERFACEVERSION_GAMEEVENTSMANAGER2 "GAMEEVENTSMANAGER002"
-#endif
-
 #include "game_api.h"
 #include "runtime.h"
 
@@ -41,6 +37,7 @@ public:
                                 bool fake_player);
     void Hook_ClientCommand(CPlayerSlot slot, const CCommand& command);
 
+    int Hook_LoadEventsFromFile(const char* filename, bool search_all);
     bool Hook_FireEvent(IGameEvent* event, bool dont_broadcast);
     bool Hook_FireEventPost(IGameEvent* event, bool dont_broadcast);
 
@@ -71,6 +68,7 @@ private:
     int client_put_in_server_hook_id_{-1};
     int client_connected_hook_id_{-1};
     int client_command_hook_id_{-1};
+    int load_events_hook_id_{-1};
     int fire_event_pre_hook_id_{-1};
     int fire_event_post_hook_id_{-1};
     std::vector<IGameEvent*> event_copies_;
