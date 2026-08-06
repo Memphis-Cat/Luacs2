@@ -27,7 +27,8 @@ struct LuaCSGameApiImpl {
     using GiveNamedItemFn = void*(__fastcall*)(void*, const char*, void*, void*,
                                                void*, void*);
     using RemoveWeaponsFn = void(__fastcall*)(void*);
-    using DropWeaponFn = void(__fastcall*)(void*, void*);
+    using DropWeaponFn = void(__fastcall*)(void*, void*, const void*, const void*);
+    using SelectWeaponFn = void(__fastcall*)(void*, void*, int);
     using RemovePlayerItemFn = void(__fastcall*)(void*, void*);
     using RemoveEntityFn = void(__fastcall*)(void*);
     using SwitchTeamFn = void(__fastcall*)(void*, unsigned char);
@@ -37,8 +38,6 @@ struct LuaCSGameApiImpl {
     using CommitSuicideFn = void(__fastcall*)(void*, bool, bool);
     using RespawnFn = void(__fastcall*)(void*);
     using ChangeTeamFn = void(__fastcall*)(void*, int);
-    using SetStateChangedFn = void(__fastcall*)(void*, std::uint32_t,
-                                                std::uint32_t, std::uint32_t);
 
     struct EventContext {
         IGameEvent* event{};
@@ -54,7 +53,7 @@ struct LuaCSGameApiImpl {
     CSchemaSystemTypeScope* server_scope{};
     ICvar* cvars{};
     IGameEventManager2* event_manager{};
-    void* game_event_manager_init{};
+    void* event_manager_vtable{};
 
     ClientPrintFn client_print{};
     ClientPrintAllFn client_print_all{};
@@ -65,7 +64,9 @@ struct LuaCSGameApiImpl {
 
     std::size_t give_named_item_index{};
     std::size_t remove_weapons_index{};
+    std::size_t drop_active_weapon_index{};
     std::size_t drop_weapon_index{};
+    std::size_t select_weapon_index{};
     std::size_t teleport_index{};
     std::size_t commit_suicide_index{};
     std::size_t respawn_index{};
@@ -126,8 +127,10 @@ struct LuaCSGameApiImpl {
         return table ? reinterpret_cast<Function>(table[index]) : nullptr;
     }
 
-    void state_changed(void* object, std::uint32_t offset,
-                       std::uint32_t array_index = 0xFFFFFFFFu) const;
+    void state_changed(CEntityInstance* entity, std::uint32_t offset,
+                       int array_index = -1) const;
+    void state_changed(CEntityInstance* entity, std::uint32_t outer_offset,
+                       std::uint32_t inner_offset, int array_index = -1) const;
 
     bool player_state(int slot, luacs::PlayerState& output,
                       std::string& error) const;
@@ -190,6 +193,7 @@ using FactoryFn = void*(__cdecl*)(const char*, int*);
 FactoryFn module_factory(const wchar_t* module_name);
 std::string read_file(const std::filesystem::path& path);
 void* find_pattern(HMODULE module, std::string_view text);
+void* find_virtual_table(HMODULE module, std::string_view class_name);
 bool valid_slot(int slot);
 bool valid_destination(int destination);
 
