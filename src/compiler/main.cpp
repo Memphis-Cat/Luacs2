@@ -273,7 +273,8 @@ CompileReport compile_one(const std::filesystem::path& source_path,
     }
 
     MemoryTracker memory;
-    lua_State* state = lua_newstate(&tracking_allocator, &memory);
+    lua_State* state = lua_newstate(
+        &tracking_allocator, &memory, static_cast<unsigned>(GetTickCount()));
     if (!state) {
         report.error = "Could not create the Lua compiler state.";
         report.elapsed_seconds =
