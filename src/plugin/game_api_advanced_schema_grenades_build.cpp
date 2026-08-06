@@ -38,12 +38,74 @@ bool set_float_property(LuaCSAdvancedApi* api, int entity_index,
                              error);
 }
 
+bool integer_fits_signed(int value, std::uint16_t width) {
+    switch (width) {
+        case 1:
+            return value >= std::numeric_limits<std::int8_t>::min() &&
+                   value <= std::numeric_limits<std::int8_t>::max();
+        case 2:
+            return value >= std::numeric_limits<std::int16_t>::min() &&
+                   value <= std::numeric_limits<std::int16_t>::max();
+        case 4:
+        case 8:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool integer_fits_unsigned(int value, std::uint16_t width) {
+    if (value < 0) return false;
+    switch (width) {
+        case 1:
+            return static_cast<unsigned int>(value) <=
+                   std::numeric_limits<std::uint8_t>::max();
+        case 2:
+            return static_cast<unsigned int>(value) <=
+                   std::numeric_limits<std::uint16_t>::max();
+        case 4:
+        case 8:
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool set_integer_property(LuaCSAdvancedApi* api, int entity_index,
                           const char* property, int value,
                           std::string& error) {
+    PropertyInfo info;
+    if (!api->property_info(entity_index, property, info, error)) {
+        return false;
+    }
+
     PropertyValue property_value;
-    property_value.kind = PropertyKind::SignedInteger;
-    property_value.signed_value = value;
+    property_value.width = static_cast<std::uint8_t>(info.element_size);
+    switch (info.kind) {
+        case PropertyKind::SignedInteger:
+            if (!integer_fits_signed(value, info.element_size)) {
+                error = std::string(property) +
+                        " value does not fit its signed schema width";
+                return false;
+            }
+            property_value.kind = PropertyKind::SignedInteger;
+            property_value.signed_value = value;
+            break;
+        case PropertyKind::UnsignedInteger:
+            if (!integer_fits_unsigned(value, info.element_size)) {
+                error = std::string(property) +
+                        " value does not fit its unsigned schema width";
+                return false;
+            }
+            property_value.kind = PropertyKind::UnsignedInteger;
+            property_value.unsigned_value =
+                static_cast<std::uint64_t>(value);
+            break;
+        default:
+            error = std::string(property) +
+                    " is not an integer schema property";
+            return false;
+    }
     return api->property_set(entity_index, property, -1, property_value, true,
                              error);
 }
