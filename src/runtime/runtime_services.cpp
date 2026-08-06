@@ -2,11 +2,38 @@
 #include "runtime_helpers.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <string>
 
 namespace luacs {
 using namespace detail;
 
+namespace {
+
+void copy_text(char* destination, std::size_t capacity, std::string_view value) {
+    if (!destination || capacity == 0) return;
+    std::snprintf(destination, capacity, "%.*s", static_cast<int>(value.size()),
+                  value.data());
+}
+
+void clear_text(char* destination, std::size_t capacity) {
+    if (destination && capacity != 0) destination[0] = '\0';
+}
+
+} // namespace
+
 Runtime* Runtime::from_services(void* context) { return static_cast<Runtime*>(context); }
+
+void Runtime::set_host_operations(HostOperations host_operations) {
+    host_operations_ = std::move(host_operations);
+    services_.hud_print = &Runtime::service_hud_print;
+    services_.cvar_exists = &Runtime::service_cvar_exists;
+    services_.cvar_get = &Runtime::service_cvar_get;
+    services_.cvar_set = &Runtime::service_cvar_set;
+    services_.weapon_give = &Runtime::service_weapon_give;
+    services_.weapon_remove_all = &Runtime::service_weapon_remove_all;
+    services_.weapon_drop_active = &Runtime::service_weapon_drop_active;
+}
 
 void Runtime::service_log(void* context, lua_State* state, const char* text) {
     auto* runtime = from_services(context);
@@ -82,6 +109,111 @@ bool Runtime::service_command_on(void* context, lua_State* state, const char* co
     lua_pushvalue(state, callback_index);
     vm->commands[normalize_name(command_name)].push_back(luaL_ref(state, LUA_REGISTRYINDEX));
     return true;
+}
+
+bool Runtime::service_hud_print(void* context, int slot, int destination,
+                                const char* message, char* error,
+                                std::size_t error_size) {
+    clear_text(error, error_size);
+    auto* runtime = from_services(context);
+    if (!runtime || !runtime->host_operations_.hud_print) {
+        copy_text(error, error_size, "HUD service is unavailable.");
+        return false;
+    }
+    std::string operation_error;
+    const bool result = runtime->host_operations_.hud_print(
+        slot, destination, message ? std::string_view(message) : std::string_view(),
+        operation_error);
+    if (!result) copy_text(error, error_size, operation_error);
+    return result;
+}
+
+bool Runtime::service_cvar_exists(void* context, const char* name) {
+    auto* runtime = from_services(context);
+    return runtime && runtime->host_operations_.cvar_exists && name &&
+           runtime->host_operations_.cvar_exists(name);
+}
+
+bool Runtime::service_cvar_get(void* context, const char* name, char* output,
+                               std::size_t output_size, char* error,
+                               std::size_t error_size) {
+    clear_text(output, output_size);
+    clear_text(error, error_size);
+    auto* runtime = from_services(context);
+    if (!runtime || !runtime->host_operations_.cvar_get) {
+        copy_text(error, error_size, "Cvar service is unavailable.");
+        return false;
+    }
+    std::string value;
+    std::string operation_error;
+    const bool result = runtime->host_operations_.cvar_get(
+        name ? std::string_view(name) : std::string_view(), value, operation_error);
+    if (result) {
+        copy_text(output, output_size, value);
+    } else {
+        copy_text(error, error_size, operation_error);
+    }
+    return result;
+}
+
+bool Runtime::service_cvar_set(void* context, const char* name, const char* value,
+                               char* error, std::size_t error_size) {
+    clear_text(error, error_size);
+    auto* runtime = from_services(context);
+    if (!runtime || !runtime->host_operations_.cvar_set) {
+        copy_text(error, error_size, "Cvar service is unavailable.");
+        return false;
+    }
+    std::string operation_error;
+    const bool result = runtime->host_operations_.cvar_set(
+        name ? std::string_view(name) : std::string_view(),
+        value ? std::string_view(value) : std::string_view(), operation_error);
+    if (!result) copy_text(error, error_size, operation_error);
+    return result;
+}
+
+bool Runtime::service_weapon_give(void* context, int slot, const char* class_name,
+                                  char* error, std::size_t error_size) {
+    clear_text(error, error_size);
+    auto* runtime = from_services(context);
+    if (!runtime || !runtime->host_operations_.weapon_give) {
+        copy_text(error, error_size, "Weapon service is unavailable.");
+        return false;
+    }
+    std::string operation_error;
+    const bool result = runtime->host_operations_.weapon_give(
+        slot, class_name ? std::string_view(class_name) : std::string_view(),
+        operation_error);
+    if (!result) copy_text(error, error_size, operation_error);
+    return result;
+}
+
+bool Runtime::service_weapon_remove_all(void* context, int slot, char* error,
+                                        std::size_t error_size) {
+    clear_text(error, error_size);
+    auto* runtime = from_services(context);
+    if (!runtime || !runtime->host_operations_.weapon_remove_all) {
+        copy_text(error, error_size, "Weapon service is unavailable.");
+        return false;
+    }
+    std::string operation_error;
+    const bool result = runtime->host_operations_.weapon_remove_all(slot, operation_error);
+    if (!result) copy_text(error, error_size, operation_error);
+    return result;
+}
+
+bool Runtime::service_weapon_drop_active(void* context, int slot, char* error,
+                                         std::size_t error_size) {
+    clear_text(error, error_size);
+    auto* runtime = from_services(context);
+    if (!runtime || !runtime->host_operations_.weapon_drop_active) {
+        copy_text(error, error_size, "Weapon service is unavailable.");
+        return false;
+    }
+    std::string operation_error;
+    const bool result = runtime->host_operations_.weapon_drop_active(slot, operation_error);
+    if (!result) copy_text(error, error_size, operation_error);
+    return result;
 }
 
 } // namespace luacs
