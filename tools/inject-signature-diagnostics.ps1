@@ -12,6 +12,45 @@ if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
 $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
 $text = [System.IO.File]::ReadAllText($resolvedPath).Replace("`r`n", "`n")
 
+$includeMarker = @'
+#include "game_api_internal.h"
+'@.Replace("`r`n", "`n")
+$includeReplacement = @'
+#include "game_api_internal.h"
+#include "server_module.h"
+'@.Replace("`r`n", "`n")
+$includeOccurrences = ([regex]::Matches(
+    $text,
+    [regex]::Escape($includeMarker))).Count
+if ($includeOccurrences -ne 1) {
+    throw "expected exactly one game API include marker, found $includeOccurrences"
+}
+$text = $text.Replace($includeMarker, $includeReplacement)
+
+$moduleMarker = @'
+    const HMODULE server_module = GetModuleHandleW(L"server.dll");
+    if (!server_module) {
+        error = "server.dll is not loaded";
+        return false;
+    }
+'@.Replace("`r`n", "`n")
+$moduleReplacement = @'
+    const HMODULE server_module =
+        static_cast<HMODULE>(LuaCSGameServerModule());
+    if (!server_module) {
+        error = "actual CS2 game server module was not bound from the live "
+                "IServerGameDLL interface";
+        return false;
+    }
+'@.Replace("`r`n", "`n")
+$moduleOccurrences = ([regex]::Matches(
+    $text,
+    [regex]::Escape($moduleMarker))).Count
+if ($moduleOccurrences -ne 1) {
+    throw "expected exactly one basename server.dll lookup, found $moduleOccurrences"
+}
+$text = $text.Replace($moduleMarker, $moduleReplacement)
+
 $startMarker = @'
     impl_->client_print = reinterpret_cast<LuaCSGameApiImpl::ClientPrintFn>(
 '@.Replace("`r`n", "`n")
@@ -117,6 +156,8 @@ $replacement = @'
             if (index != 0) message << ", ";
             message << missing_functions[index];
         }
+        message << "\nSelected game server module: "
+                << LuaCSGameServerModulePath().string();
         message << "\nSignature scan diagnostics:";
         for (const auto& detail : signature_diagnostics) {
             message << "\n  - " << detail;
@@ -131,6 +172,10 @@ $replacement = @'
 
 $updated = $text.Substring(0, $start) + $replacement + $text.Substring($end)
 foreach ($required in @(
+    '#include "server_module.h"',
+    'LuaCSGameServerModule()',
+    'LuaCSGameServerModulePath().string()',
+    'Selected game server module:',
     'Signature scan diagnostics:',
     'luacs_game_internal::g_pattern_scan_diagnostic',
     'pattern-bytes=',
@@ -142,8 +187,13 @@ foreach ($required in @(
         throw "generated deep signature diagnostics are missing '$required'"
     }
 }
-if ($updated.Contains('std::vector<const char*> missing_functions;')) {
-    throw 'legacy shallow signature failure collection remains after injection'
+foreach ($obsolete in @(
+    'GetModuleHandleW(L"server.dll")',
+    'std::vector<const char*> missing_functions;'
+)) {
+    if ($updated.Contains($obsolete)) {
+        throw "generated game API still contains obsolete token '$obsolete'"
+    }
 }
 
 [System.IO.File]::WriteAllText(
@@ -151,4 +201,6 @@ if ($updated.Contains('std::vector<const char*> missing_functions;')) {
     $updated,
     [System.Text.UTF8Encoding]::new($false))
 
-Write-Host 'Injected per-signature disk scan diagnostics into the generated game API.'
+Write-Host (
+    'Injected bound-module selection and per-signature disk scan diagnostics ' +
+    'into the generated game API.')
