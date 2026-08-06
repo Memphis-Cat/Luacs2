@@ -1,3 +1,14 @@
+plugin = {
+    name = "Welcome Example",
+    author = "Memphis-Cat",
+    version = "1.0.0",
+    description = "Demonstrates LuaCS events, players, weapons, HUD, and cvars."
+}
+
+function plugin:unload()
+    print("Welcome Example is unloading cleanly.")
+end
+
 local events = require("cs2.events")
 local commands = require("cs2.commands")
 local players = require("cs2.players")
