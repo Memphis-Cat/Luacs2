@@ -78,10 +78,10 @@ try {
         "property_collection_resize"
     )
     Assert-SourceTokens $advancedAdapter @(
-        "property_get_raw_v2",
-        "property_set_raw_v2",
-        "property_collection_resize_v2",
-        "property_child_at_v2",
+        "property_get_raw_complete",
+        "property_set_raw_complete",
+        "property_collection_resize_complete",
+        "property_child_at_complete",
         "services.property_get_raw",
         "services.property_child_at"
     )
