@@ -10,8 +10,10 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
 SH_DECL_HOOK4_void(IServerGameClients, ClientActive, SH_NOATTRIB, 0,
@@ -260,67 +262,70 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
     fire_event_post_hook_id_ = SH_ADD_HOOK(
         IGameEventManager2, FireEvent, g_game_events,
         SH_MEMBER(this, &LuaCSPlugin::Hook_FireEventPost), true);
-    if (fire_event_pre_hook_id_ <= 0 || fire_event_post_hook_id_ <= 0) {
-        if (fire_event_pre_hook_id_ > 0) {
-            SH_REMOVE_HOOK_ID(fire_event_pre_hook_id_);
-        }
-        if (fire_event_post_hook_id_ > 0) {
-            SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
-        }
-        fire_event_pre_hook_id_ = -1;
-        fire_event_post_hook_id_ = -1;
+    game_frame_hook_id_ = SH_ADD_HOOK(
+        IServerGameDLL, GameFrame, g_server,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_GameFrame), true);
+    client_active_hook_id_ = SH_ADD_HOOK(
+        IServerGameClients, ClientActive, g_game_clients,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_ClientActive), true);
+    client_disconnect_hook_id_ = SH_ADD_HOOK(
+        IServerGameClients, ClientDisconnect, g_game_clients,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_ClientDisconnect), true);
+    client_put_in_server_hook_id_ = SH_ADD_HOOK(
+        IServerGameClients, ClientPutInServer, g_game_clients,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_ClientPutInServer), true);
+    client_connected_hook_id_ = SH_ADD_HOOK(
+        IServerGameClients, OnClientConnected, g_game_clients,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_OnClientConnected), false);
+    client_command_hook_id_ = SH_ADD_HOOK(
+        IServerGameClients, ClientCommand, g_game_clients,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
+
+    std::vector<std::string_view> failed_hooks;
+    if (fire_event_pre_hook_id_ <= 0)
+        failed_hooks.push_back("IGameEventManager2::FireEvent pre");
+    if (fire_event_post_hook_id_ <= 0)
+        failed_hooks.push_back("IGameEventManager2::FireEvent post");
+    if (game_frame_hook_id_ <= 0)
+        failed_hooks.push_back("IServerGameDLL::GameFrame");
+    if (client_active_hook_id_ <= 0)
+        failed_hooks.push_back("IServerGameClients::ClientActive");
+    if (client_disconnect_hook_id_ <= 0)
+        failed_hooks.push_back("IServerGameClients::ClientDisconnect");
+    if (client_put_in_server_hook_id_ <= 0)
+        failed_hooks.push_back("IServerGameClients::ClientPutInServer");
+    if (client_connected_hook_id_ <= 0)
+        failed_hooks.push_back("IServerGameClients::OnClientConnected");
+    if (client_command_hook_id_ <= 0)
+        failed_hooks.push_back("IServerGameClients::ClientCommand");
+
+    if (!failed_hooks.empty()) {
+        remove_hooks();
         unregister_lua_command();
         g_runtime = nullptr;
         runtime_.shutdown();
         game_api_.shutdown();
-        const std::string message =
-            "Could not install IGameEventManager2::FireEvent pre/post hooks.";
-        write_console("[ERROR] (lua) " + message);
-        copy_error(error, maxlen, message);
+
+        std::ostringstream message;
+        message << "Could not install required Source 2 hook(s): ";
+        for (std::size_t index = 0; index < failed_hooks.size(); ++index) {
+            if (index != 0) message << ", ";
+            message << failed_hooks[index];
+        }
+        write_console("[ERROR] (lua) " + message.str());
+        copy_error(error, maxlen, message.str());
         return false;
     }
 
     g_SMAPI->AddListener(this, this);
-    SH_ADD_HOOK(IServerGameDLL, GameFrame, g_server,
-                SH_MEMBER(this, &LuaCSPlugin::Hook_GameFrame), true);
-    SH_ADD_HOOK(IServerGameClients, ClientActive, g_game_clients,
-                SH_MEMBER(this, &LuaCSPlugin::Hook_ClientActive), true);
-    SH_ADD_HOOK(IServerGameClients, ClientDisconnect, g_game_clients,
-                SH_MEMBER(this, &LuaCSPlugin::Hook_ClientDisconnect), true);
-    SH_ADD_HOOK(IServerGameClients, ClientPutInServer, g_game_clients,
-                SH_MEMBER(this, &LuaCSPlugin::Hook_ClientPutInServer), true);
-    SH_ADD_HOOK(IServerGameClients, OnClientConnected, g_game_clients,
-                SH_MEMBER(this, &LuaCSPlugin::Hook_OnClientConnected), false);
-    SH_ADD_HOOK(IServerGameClients, ClientCommand, g_game_clients,
-                SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
-
-    write_console("[INFO] (lua) Installed 8 Source 2 server hooks.");
+    write_console("[INFO] (lua) Installed all 8 required Source 2 hooks.");
     runtime_.load_plugins();
     write_console("[INFO] (lua) LuaCS startup completed successfully.");
     return true;
 }
 
 bool LuaCSPlugin::Unload(char*, size_t) {
-    SH_REMOVE_HOOK(IServerGameDLL, GameFrame, g_server,
-                   SH_MEMBER(this, &LuaCSPlugin::Hook_GameFrame), true);
-    SH_REMOVE_HOOK(IServerGameClients, ClientActive, g_game_clients,
-                   SH_MEMBER(this, &LuaCSPlugin::Hook_ClientActive), true);
-    SH_REMOVE_HOOK(IServerGameClients, ClientDisconnect, g_game_clients,
-                   SH_MEMBER(this, &LuaCSPlugin::Hook_ClientDisconnect), true);
-    SH_REMOVE_HOOK(IServerGameClients, ClientPutInServer, g_game_clients,
-                   SH_MEMBER(this, &LuaCSPlugin::Hook_ClientPutInServer), true);
-    SH_REMOVE_HOOK(IServerGameClients, OnClientConnected, g_game_clients,
-                   SH_MEMBER(this, &LuaCSPlugin::Hook_OnClientConnected), false);
-    SH_REMOVE_HOOK(IServerGameClients, ClientCommand, g_game_clients,
-                   SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
-    if (fire_event_pre_hook_id_ > 0) {
-        SH_REMOVE_HOOK_ID(fire_event_pre_hook_id_);
-        fire_event_pre_hook_id_ = -1;
-    }
-    if (fire_event_post_hook_id_ > 0) {
-        SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
-        fire_event_post_hook_id_ = -1;
-    }
+    remove_hooks();
     unregister_lua_command();
     g_runtime = nullptr;
     free_event_copies();
@@ -329,6 +334,21 @@ bool LuaCSPlugin::Unload(char*, size_t) {
     g_game_events = nullptr;
     write_console("[INFO] (lua) LuaCS unloaded.");
     return true;
+}
+
+void LuaCSPlugin::remove_hooks() {
+    const auto remove = [](int& hook_id) {
+        if (hook_id > 0) SH_REMOVE_HOOK_ID(hook_id);
+        hook_id = -1;
+    };
+    remove(game_frame_hook_id_);
+    remove(client_active_hook_id_);
+    remove(client_disconnect_hook_id_);
+    remove(client_put_in_server_hook_id_);
+    remove(client_connected_hook_id_);
+    remove(client_command_hook_id_);
+    remove(fire_event_pre_hook_id_);
+    remove(fire_event_post_hook_id_);
 }
 
 void LuaCSPlugin::AllPluginsLoaded() {}
