@@ -58,8 +58,8 @@ public:
     Runtime& operator=(const Runtime&) = delete;
 
     bool initialize(std::filesystem::path root, ConsoleWriter console_writer,
-                    ServerCommand server_command, HostOperations host_operations,
-                    std::string& error);
+                    ServerCommand server_command, std::string& error);
+    void set_host_operations(HostOperations host_operations);
     void shutdown();
     void load_plugins();
     void tick();
