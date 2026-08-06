@@ -4,14 +4,16 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include <fstream>
 #include <ctime>
+#include <fstream>
 #include <sstream>
 
 namespace luacs {
 using namespace detail;
 
 namespace {
+
+inline constexpr const char* kEventMeta = "LuaCS.Event";
 
 struct ParsedLogMessage {
     std::string_view level{"INFO"};
@@ -83,7 +85,8 @@ void Runtime::level_shutdown() {
     emit("map_end", [](lua_State* state) { lua_newtable(state); });
 }
 
-void Runtime::player_connected(int slot, std::string_view name, std::uint64_t steam64,
+void Runtime::player_connected(int slot, std::string_view name,
+                               std::uint64_t steam64,
                                std::string_view steam_id, bool fake) {
     auto& player = players_[slot];
     player.slot = slot;
@@ -98,28 +101,35 @@ void Runtime::player_connected(int slot, std::string_view name, std::uint64_t st
     emit_player("player_connect", player);
 }
 
-void Runtime::player_active(int slot, std::string_view name, std::uint64_t steam64) {
+void Runtime::player_active(int slot, std::string_view name,
+                            std::uint64_t steam64) {
     auto& player = players_[slot];
     player.slot = slot;
     if (!name.empty()) player.name = name;
     if (steam64) player.steam64 = steam64;
-    if (player.steam_id.empty()) player.steam_id = steam2_from_steam64(player.steam64);
+    if (player.steam_id.empty()) {
+        player.steam_id = steam2_from_steam64(player.steam64);
+    }
     player.connected = true;
     player.active = true;
     emit_player("player_activate", player);
 }
 
-void Runtime::player_put_in_server(int slot, std::string_view name, std::uint64_t steam64) {
+void Runtime::player_put_in_server(int slot, std::string_view name,
+                                   std::uint64_t steam64) {
     auto& player = players_[slot];
     player.slot = slot;
     if (!name.empty()) player.name = name;
     if (steam64) player.steam64 = steam64;
-    if (player.steam_id.empty()) player.steam_id = steam2_from_steam64(player.steam64);
+    if (player.steam_id.empty()) {
+        player.steam_id = steam2_from_steam64(player.steam64);
+    }
     player.connected = true;
     emit_player("player_put_in_server", player);
 }
 
-void Runtime::player_disconnected(int slot, std::string_view name, std::uint64_t steam64,
+void Runtime::player_disconnected(int slot, std::string_view name,
+                                  std::uint64_t steam64,
                                   std::string_view steam_id) {
     PlayerSnapshot player;
     if (const auto found = players_.find(slot); found != players_.end()) {
@@ -138,10 +148,7 @@ void Runtime::player_disconnected(int slot, std::string_view name, std::uint64_t
 }
 
 void Runtime::client_command(int slot, std::string_view command_line) {
-    const PlayerSnapshot* player = nullptr;
-    if (const auto found = players_.find(slot); found != players_.end()) {
-        player = &found->second;
-    }
+    const PlayerSnapshot* player = player_snapshot(slot);
 
     emit("client_command", [&](lua_State* state) {
         lua_newtable(state);
@@ -156,20 +163,80 @@ void Runtime::client_command(int slot, std::string_view command_line) {
     if (!name.empty()) dispatch_command(player, name, arguments, command_line);
 }
 
+void Runtime::dispatch_game_event(std::uint64_t token, std::string_view name,
+                                  int id, bool reliable, bool local, bool post,
+                                  bool dont_broadcast) {
+    const std::string key = normalize_name(name);
+    if (key.empty() || token == 0) return;
+
+    for (auto& vm_ptr : scripts_) {
+        auto& vm = *vm_ptr;
+        const auto found = vm.events.find(key);
+        if (found == vm.events.end()) continue;
+
+        const auto callbacks = found->second;
+        for (const auto& callback : callbacks) {
+            if (callback.post != post) continue;
+
+            lua_rawgeti(vm.state, LUA_REGISTRYINDEX, callback.reference);
+            if (callback.mode == EventCallbackMode::PlayerOnly) {
+                int slot = -1;
+                if (host_operations_.event_get_player_slot &&
+                    host_operations_.event_get_player_slot(token, "userid",
+                                                           slot)) {
+                    if (const auto* player = player_snapshot(slot)) {
+                        push_player(vm.state, *player);
+                    } else {
+                        lua_pushnil(vm.state);
+                    }
+                } else {
+                    lua_pushnil(vm.state);
+                }
+            } else {
+                lua_createtable(vm.state, 0, 9);
+                lua_pushinteger(vm.state,
+                                static_cast<lua_Integer>(token));
+                lua_setfield(vm.state, -2, "__token");
+                push_string_field(vm.state, "name", name);
+                push_integer_field(vm.state, "id", id);
+                push_bool_field(vm.state, "reliable", reliable);
+                push_bool_field(vm.state, "local", local);
+                push_bool_field(vm.state, "post", post);
+                push_bool_field(vm.state, "dont_broadcast", dont_broadcast);
+
+                luaL_getmetatable(vm.state, kEventMeta);
+                if (lua_istable(vm.state, -1)) {
+                    lua_setmetatable(vm.state, -2);
+                } else {
+                    lua_pop(vm.state, 1);
+                }
+            }
+
+            protected_call(vm, 1, 0,
+                           std::string(post ? "post game event '"
+                                            : "pre game event '") +
+                               key + "'");
+        }
+    }
+}
+
 double Runtime::now() const {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - started_)
+    return std::chrono::duration<double>(
+               std::chrono::steady_clock::now() - started_)
         .count();
 }
 
-void Runtime::emit(std::string_view event_name,
-                   const std::function<void(lua_State*)>& push_event_table) {
+void Runtime::emit(
+    std::string_view event_name,
+    const std::function<void(lua_State*)>& push_event_table) {
     const std::string key = normalize_name(event_name);
     for (auto& vm_ptr : scripts_) {
         auto& vm = *vm_ptr;
         const auto found = vm.events.find(key);
         if (found == vm.events.end()) continue;
-        auto callbacks = found->second;
+        const auto callbacks = found->second;
         for (const auto& callback : callbacks) {
+            if (callback.post) continue;
             lua_rawgeti(vm.state, LUA_REGISTRYINDEX, callback.reference);
             push_event_table(vm.state);
             if (callback.mode == EventCallbackMode::PlayerOnly) {
@@ -181,7 +248,8 @@ void Runtime::emit(std::string_view event_name,
     }
 }
 
-void Runtime::emit_player(std::string_view event_name, const PlayerSnapshot& player) {
+void Runtime::emit_player(std::string_view event_name,
+                          const PlayerSnapshot& player) {
     emit(event_name, [&](lua_State* state) {
         lua_newtable(state);
         push_player(state, player);
@@ -189,14 +257,16 @@ void Runtime::emit_player(std::string_view event_name, const PlayerSnapshot& pla
     });
 }
 
-void Runtime::dispatch_command(const PlayerSnapshot* player, std::string_view name,
-                               std::string_view arguments, std::string_view raw) {
+void Runtime::dispatch_command(const PlayerSnapshot* player,
+                               std::string_view name,
+                               std::string_view arguments,
+                               std::string_view raw) {
     const std::string key = normalize_name(name);
     for (auto& vm_ptr : scripts_) {
         auto& vm = *vm_ptr;
         const auto found = vm.commands.find(key);
         if (found == vm.commands.end()) continue;
-        auto callbacks = found->second;
+        const auto callbacks = found->second;
         for (int reference : callbacks) {
             lua_rawgeti(vm.state, LUA_REGISTRYINDEX, reference);
             if (player) {
@@ -213,7 +283,8 @@ void Runtime::dispatch_command(const PlayerSnapshot* player, std::string_view na
 
 void Runtime::log(ScriptVm& vm, std::string_view text) {
     const auto parsed = parse_level(text);
-    const auto plugin_line = format_log_line(parsed.level, vm.name, parsed.message);
+    const auto plugin_line =
+        format_log_line(parsed.level, vm.name, parsed.message);
     const auto console_line =
         format_log_line(parsed.level, "lua:" + vm.name, parsed.message);
 
@@ -237,7 +308,8 @@ std::filesystem::path Runtime::create_log_path() const {
     for (std::uint32_t index = 1; index < 1000000; ++index) {
         std::ostringstream name;
         name << local.tm_mday << (local.tm_mon + 1) << (local.tm_year + 1900)
-             << local.tm_hour << local.tm_min << local.tm_sec << index << ".log";
+             << local.tm_hour << local.tm_min << local.tm_sec << index
+             << ".log";
         auto path = logs_dir_ / name.str();
         if (!std::filesystem::exists(path)) return path;
     }
