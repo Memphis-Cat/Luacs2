@@ -39,6 +39,8 @@ luacs::Runtime* g_runtime = nullptr;
 
 namespace {
 
+bool g_lua_command_registered = false;
+
 std::filesystem::path module_path() {
     HMODULE module{};
     GetModuleHandleExW(
@@ -149,6 +151,21 @@ ConCommand g_lua_command(
     "lua", ConCommandCallbackInfo_t(&command_lua),
     "LuaCS runtime and plugin administration. Use 'lua help'.", FCVAR_RELEASE);
 
+bool register_lua_command() {
+    META_CONVAR_REGISTER(FCVAR_RELEASE);
+    g_lua_command_registered =
+        g_lua_command.IsValidRef() && g_lua_command.HasCallback();
+    if (!g_lua_command_registered) ConVar_Unregister();
+    return g_lua_command_registered;
+}
+
+void unregister_lua_command() {
+    if (!g_lua_command_registered) return;
+    g_SMAPI->UnregisterConCommand(g_PLAPI, &g_lua_command);
+    ConVar_Unregister();
+    g_lua_command_registered = false;
+}
+
 } // namespace
 
 PLUGIN_EXPOSE(LuaCSPlugin, g_LuaCSPlugin);
@@ -225,12 +242,13 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
     runtime_.set_host_operations(game_api_.host_operations());
     g_runtime = &runtime_;
 
-    if (!META_REGCVAR(&g_lua_command)) {
+    if (!register_lua_command()) {
         g_runtime = nullptr;
         runtime_.shutdown();
         game_api_.shutdown();
         const std::string message =
-            "Could not register the server-console 'lua' command.";
+            "Could not register the server-console 'lua' command through the "
+            "Source 2 convar system.";
         write_console("[ERROR] (lua) " + message);
         copy_error(error, maxlen, message);
         return false;
@@ -249,7 +267,7 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         if (fire_event_post_hook_id_ >= 0) {
             SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
         }
-        META_UNREGCVAR(&g_lua_command);
+        unregister_lua_command();
         g_runtime = nullptr;
         runtime_.shutdown();
         game_api_.shutdown();
@@ -301,7 +319,7 @@ bool LuaCSPlugin::Unload(char*, size_t) {
         SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
         fire_event_post_hook_id_ = -1;
     }
-    META_UNREGCVAR(&g_lua_command);
+    unregister_lua_command();
     g_runtime = nullptr;
     free_event_copies();
     runtime_.shutdown();
