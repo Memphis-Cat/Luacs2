@@ -17,8 +17,10 @@ $advancedHeader = Join-Path $root "include\luacs\advanced_world_api.h"
 $advancedAdapter = Join-Path $root "src\plugin\game_api_advanced_build.cpp"
 $advancedComplete = Join-Path $root "src\plugin\game_api_advanced_complete_build.cpp"
 $advancedFinal = Join-Path $root "src\plugin\game_api_advanced_final_build.cpp"
+$advancedVerified = Join-Path $root "src\plugin\game_api_advanced_verified_build.cpp"
 $propertiesSource = Join-Path $root "src\modules\properties\properties.cpp"
 $tracesSource = Join-Path $root "src\modules\traces\traces.cpp"
+$tracesVerified = Join-Path $root "src\modules\traces\traces_verified.cpp"
 $grenadesSource = Join-Path $root "src\modules\grenades\grenades.cpp"
 
 function Assert-SourceTokens {
@@ -66,8 +68,9 @@ try {
     }
 
     Assert-SourceTokens $cmakeFile @(
-        "src/plugin/game_api_advanced_final_build.cpp",
-        "add_luacs_module(traces src/modules/traces/traces.cpp)"
+        "src/plugin/game_api_advanced_verified_build.cpp",
+        "add_luacs_module(traces src/modules/traces/traces_verified.cpp)",
+        "sourcehook_impl_chookmaninfo.cpp"
     )
     Assert-SourceTokens $advancedHeader @(
         "kAdvancedWorldServicesAbiVersion = 3",
@@ -106,6 +109,12 @@ try {
         "grenade_spawn_final",
         "services.grenade_spawn = &grenade_spawn_final"
     )
+    Assert-SourceTokens $advancedVerified @(
+        '#include "game_api_advanced_final_build.cpp"',
+        "sizeof(Ray_t) == sizeof(LuaCSAdvancedApi::NativeRay)",
+        "trace object_set_mask contains unsupported Source 2 bits",
+        "services.trace = &trace_verified"
+    )
     Assert-SourceTokens $propertiesSource @(
         '"get_raw"',
         '"set_raw"',
@@ -120,6 +129,12 @@ try {
         '"SHAPE_MESH"',
         "SET_INT(contents64)",
         "SET_INT(shape_collision_function_mask)"
+    )
+    Assert-SourceTokens $tracesVerified @(
+        '#include "traces.cpp"',
+        '"MAX_IGNORE_ENTITIES"',
+        '"MAX_MESH_VERTICES"',
+        '"OBJECTS_ALL"'
     )
     Assert-SourceTokens $grenadesSource @(
         "thrower_entity_index",
@@ -188,7 +203,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, final ABI v3 adapters, Lua modules, and compiler smoke tests passed."
+    Write-Host "LuaCS package, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
