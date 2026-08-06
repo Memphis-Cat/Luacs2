@@ -60,6 +60,7 @@ try {
 
     $cmakeFile = Join-Path $root "CMakeLists.txt"
     $gameApiSource = Join-Path $root "src\plugin\game_api.cpp"
+    $pluginHeader = Join-Path $root "src\plugin\plugin.h"
     $pluginSource = Join-Path $root "src\plugin\plugin.cpp"
     $runtimeHeader = Join-Path $root "src\runtime\runtime.h"
     $runtimeSource = Join-Path $root "src\runtime\runtime.cpp"
@@ -101,6 +102,10 @@ try {
     Assert-SourceOmits $gameApiSource @(
         "could not resolve one or more required CS2 functions or the CGameEventManager vtable"
     )
+    Assert-SourceTokens $pluginHeader @(
+        "INTERFACEVERSION_GAMEEVENTSMANAGER2",
+        '"GAMEEVENTSMANAGER002"'
+    )
     Assert-SourceTokens $pluginSource @(
         "GET_V_IFACE_CURRENT(GetEngineFactory, g_game_events, IGameEventManager2",
         "ConCommand g_lua_command",
@@ -136,7 +141,7 @@ try {
         'action == "force_unload"',
         'lua_getglobal(vm.state, "OnUnload")',
         'lua_getfield(vm.state, plugin_table, "unload")',
-        '"source alias: "', '"Last error: "'
+        'source alias: ', 'Last error: '
     )
     Assert-SourceTokens $exampleSource @(
         "plugin = {", 'name = "Welcome Example"',
