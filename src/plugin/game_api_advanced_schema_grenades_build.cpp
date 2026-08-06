@@ -1,5 +1,6 @@
 // Use current CS2 grenade schema fields for projectile initialization, fuses,
-// and detonation. The verified trace/final grenade layers remain the base.
+// detonation, and subclass-specific state. The verified trace/final grenade
+// layers remain the base.
 #include "game_api_advanced_verified_build.cpp"
 
 namespace {
@@ -196,6 +197,15 @@ bool grenade_get_schema_impl(LuaCSAdvancedApi* api, int entity_index,
     if (!output.exploded &&
         api->optional_value(entity_index, "m_bDetonationRecorded", value)) {
         output.exploded = property_bool(value);
+    }
+    if ((output.type == GrenadeType::Molotov ||
+         output.type == GrenadeType::Incendiary) &&
+        api->optional_value(entity_index, "m_bDetonated", value)) {
+        output.exploded = property_bool(value, output.exploded);
+    }
+    if (output.type == GrenadeType::Inferno &&
+        api->optional_value(entity_index, "m_nFireLifetime", value)) {
+        output.lifetime = property_float(value, output.lifetime);
     }
     if (!output.bounce_sound &&
         api->optional_value(entity_index, "m_iszBounceSound", value) &&
