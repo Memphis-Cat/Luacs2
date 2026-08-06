@@ -30,7 +30,7 @@ bool LuaCSBindGameServerModule(void* server_interface, std::string& error) {
         return false;
     }
 
-    auto** vtable = *reinterpret_cast<void***>(server_interface);
+    void** vtable = *reinterpret_cast<void***>(server_interface);
     if (!vtable || !vtable[0]) {
         error = "IServerGameDLL has no usable virtual table entry";
         return false;
