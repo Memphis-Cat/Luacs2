@@ -8,6 +8,7 @@
 
 class IGameEvent;
 class IGameEventManager2;
+struct LuaCSGameApiImpl;
 
 struct LuaCSEventDecision {
     bool cancelled{false};
@@ -36,6 +37,5 @@ public:
     void* game_event_manager_init_address() const;
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::unique_ptr<LuaCSGameApiImpl> impl_;
 };
