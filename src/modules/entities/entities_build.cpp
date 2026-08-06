@@ -32,6 +32,7 @@ void luacs_replace_or_extend(lua_State* state, int index) {
 
 } // namespace
 
+#undef lua_replace
 #define lua_replace luacs_replace_or_extend
 #include "entities.cpp"
 #undef lua_replace
