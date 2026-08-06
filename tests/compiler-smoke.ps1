@@ -64,7 +64,7 @@ try {
 
     Assert-SourceTokens $advancedHeader @(
         "kAdvancedWorldServicesAbiVersion = 3",
-        "TraceShape::Mesh",
+        "Mesh = 4",
         "kTraceMeshVertexCapacity",
         "mesh_vertex_count",
         "contents64",
@@ -93,8 +93,8 @@ try {
         '"capsule"',
         '"mesh"',
         '"SHAPE_MESH"',
-        '"contents64"',
-        '"shape_collision_function_mask"'
+        "SET_INT(contents64)",
+        "SET_INT(shape_collision_function_mask)"
     )
     Assert-SourceTokens $grenadesSource @(
         "thrower_entity_index",
