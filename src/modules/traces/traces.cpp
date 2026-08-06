@@ -5,6 +5,7 @@ extern "C" {
 #include "lauxlib.h"
 }
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 
@@ -13,6 +14,7 @@ using luacs::AdvancedWorldServices;
 using luacs::Services;
 using luacs::TraceRequest;
 using luacs::TraceResult;
+using luacs::TraceShape;
 using luacs::Vector3;
 
 const AdvancedWorldServices* advanced() {
@@ -38,6 +40,18 @@ Vector3 read_vector(lua_State* state, int index) {
     value.z = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
     return value;
+}
+
+bool read_optional_vector(lua_State* state, int table, const char* key,
+                          Vector3& output) {
+    lua_getfield(state, table, key);
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return false;
+    }
+    output = read_vector(state, -1);
+    lua_pop(state, 1);
+    return true;
 }
 
 void push_vector(lua_State* state, const Vector3& value) {
@@ -75,6 +89,16 @@ std::uint64_t read_u64_field(lua_State* state, int table, const char* key,
     return value;
 }
 
+float read_float_field(lua_State* state, int table, const char* key,
+                       float fallback) {
+    lua_getfield(state, table, key);
+    const float value = lua_isnil(state, -1)
+                            ? fallback
+                            : static_cast<float>(luaL_checknumber(state, -1));
+    lua_pop(state, 1);
+    return value;
+}
+
 bool read_bool_field(lua_State* state, int table, const char* key,
                      bool fallback) {
     lua_getfield(state, table, key);
@@ -84,8 +108,109 @@ bool read_bool_field(lua_State* state, int table, const char* key,
     return value;
 }
 
+TraceShape read_shape_field(lua_State* state, int table,
+                            TraceShape fallback) {
+    lua_getfield(state, table, "shape");
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return fallback;
+    }
+    const lua_Integer value = luaL_checkinteger(state, -1);
+    lua_pop(state, 1);
+    if (value < static_cast<lua_Integer>(TraceShape::Line) ||
+        value > static_cast<lua_Integer>(TraceShape::Capsule)) {
+        luaL_error(state, "trace shape is out of range");
+    }
+    return static_cast<TraceShape>(value);
+}
+
+void append_ignore(lua_State* state, TraceRequest& request, int value) {
+    if (value < 0) return;
+    for (std::size_t index = 0; index < request.ignore_count; ++index) {
+        if (request.ignore_entities[index] == value) return;
+    }
+    if (request.ignore_count >= luacs::kTraceIgnoreCapacity) {
+        luaL_error(state, "trace ignore list exceeds %d entities",
+                   static_cast<int>(luacs::kTraceIgnoreCapacity));
+    }
+    request.ignore_entities[request.ignore_count++] = value;
+}
+
+void read_ignore_value(lua_State* state, int index, TraceRequest& request) {
+    if (lua_isnoneornil(state, index)) return;
+    if (lua_isinteger(state, index)) {
+        append_ignore(state, request,
+                      static_cast<int>(lua_tointeger(state, index)));
+        return;
+    }
+    luaL_checktype(state, index, LUA_TTABLE);
+
+    lua_getfield(state, index, "entity_index");
+    if (!lua_isnil(state, -1)) {
+        append_ignore(state, request,
+                      static_cast<int>(luaL_checkinteger(state, -1)));
+        lua_pop(state, 1);
+        return;
+    }
+    lua_pop(state, 1);
+
+    const lua_Integer length = luaL_len(state, index);
+    for (lua_Integer item = 1; item <= length; ++item) {
+        lua_geti(state, index, item);
+        append_ignore(state, request, entity_index_from(state, -1));
+        lua_pop(state, 1);
+    }
+}
+
+void read_options(lua_State* state, int table, TraceRequest& request) {
+    if (!lua_istable(state, table)) return;
+
+    request.shape = read_shape_field(state, table, request.shape);
+    request.contents_mask =
+        read_u64_field(state, table, "mask", request.contents_mask);
+    request.contents =
+        read_u64_field(state, table, "contents", request.contents);
+    request.interacts_with =
+        read_u64_field(state, table, "interacts_with", request.interacts_with);
+    request.interacts_exclude = read_u64_field(
+        state, table, "interacts_exclude", request.interacts_exclude);
+    request.interacts_as =
+        read_u64_field(state, table, "interacts_as", request.interacts_as);
+    request.collision_group = read_u64_field(
+        state, table, "collision_group", request.collision_group);
+    request.ignore_entities_mask = read_u64_field(
+        state, table, "object_set_mask", request.ignore_entities_mask);
+    request.radius = read_float_field(state, table, "radius", request.radius);
+    request.hit_triggers =
+        read_bool_field(state, table, "hit_triggers", request.hit_triggers);
+    request.hit_solid =
+        read_bool_field(state, table, "hit_solid", request.hit_solid);
+    request.ignore_disabled_pairs = read_bool_field(
+        state, table, "ignore_disabled_pairs", request.ignore_disabled_pairs);
+    request.ignore_if_both_hitboxes = read_bool_field(
+        state, table, "ignore_if_both_hitboxes",
+        request.ignore_if_both_hitboxes);
+    request.force_hit_everything = read_bool_field(
+        state, table, "force_hit_everything", request.force_hit_everything);
+    request.iterate_entities = read_bool_field(
+        state, table, "iterate_entities", request.iterate_entities);
+    request.hit_entities =
+        read_bool_field(state, table, "hit_entities", request.hit_entities);
+    read_optional_vector(state, table, "mins", request.mins);
+    read_optional_vector(state, table, "maxs", request.maxs);
+    read_optional_vector(state, table, "center_a", request.center_a);
+    read_optional_vector(state, table, "center_b", request.center_b);
+
+    lua_getfield(state, table, "ignore");
+    read_ignore_value(state, -1, request);
+    lua_pop(state, 1);
+    lua_getfield(state, table, "ignore_entities");
+    read_ignore_value(state, -1, request);
+    lua_pop(state, 1);
+}
+
 void push_result(lua_State* state, const TraceResult& result) {
-    lua_createtable(state, 0, 22);
+    lua_createtable(state, 0, 30);
 #define SET_BOOL(name)                                                         \
     lua_pushboolean(state, result.name);                                       \
     lua_setfield(state, -2, #name)
@@ -99,9 +224,12 @@ void push_result(lua_State* state, const TraceResult& result) {
     SET_BOOL(hit);
     SET_BOOL(start_solid);
     SET_BOOL(all_solid);
+    SET_BOOL(exact_hit_point);
     SET_NUM(fraction);
     SET_NUM(fraction_left_solid);
     SET_NUM(plane_distance);
+    SET_NUM(distance);
+    SET_NUM(hit_offset);
     SET_INT(entity_index);
     lua_pushinteger(state, result.entity_handle);
     lua_setfield(state, -2, "entity_handle");
@@ -109,6 +237,10 @@ void push_result(lua_State* state, const TraceResult& result) {
     SET_INT(hitgroup);
     SET_INT(surface_flags);
     SET_INT(contents);
+    SET_INT(triangle);
+    SET_INT(bone);
+    lua_pushinteger(state, static_cast<lua_Integer>(result.shape));
+    lua_setfield(state, -2, "shape");
 #undef SET_NUM
 #undef SET_INT
 #undef SET_BOOL
@@ -118,36 +250,18 @@ void push_result(lua_State* state, const TraceResult& result) {
     lua_setfield(state, -2, "end_position");
     push_vector(state, result.hit_position);
     lua_setfield(state, -2, "position");
+    push_vector(state, result.hit_position);
+    lua_setfield(state, -2, "hit_position");
     push_vector(state, result.plane_normal);
     lua_setfield(state, -2, "normal");
+    push_vector(state, result.plane_normal);
+    lua_setfield(state, -2, "plane_normal");
     lua_pushstring(state, result.surface_name);
     lua_setfield(state, -2, "surface_name");
 }
 
-int execute(lua_State* state, bool hull) {
+int run(lua_State* state, const TraceRequest& request) {
     const auto* api = advanced();
-    TraceRequest request;
-    request.start = read_vector(state, 1);
-    request.end = read_vector(state, 2);
-    request.use_hull = hull;
-    int options = hull ? 5 : 3;
-    if (hull) {
-        request.mins = read_vector(state, 3);
-        request.maxs = read_vector(state, 4);
-    }
-    if (lua_istable(state, options)) {
-        request.contents_mask =
-            read_u64_field(state, options, "mask", request.contents_mask);
-        request.collision_group =
-            read_u64_field(state, options, "collision_group", 0);
-        request.hit_triggers =
-            read_bool_field(state, options, "hit_triggers", false);
-        lua_getfield(state, options, "ignore");
-        if (!lua_isnil(state, -1)) {
-            request.ignore_entity_index = entity_index_from(state, -1);
-        }
-        lua_pop(state, 1);
-    }
     TraceResult result;
     char error[256]{};
     if (!api || !api->trace ||
@@ -158,9 +272,43 @@ int execute(lua_State* state, bool hull) {
     return 1;
 }
 
-int ray(lua_State* state) { return execute(state, false); }
-int hull(lua_State* state) { return execute(state, true); }
-int line(lua_State* state) { return execute(state, false); }
+int line(lua_State* state) {
+    TraceRequest request;
+    request.start = read_vector(state, 1);
+    request.end = read_vector(state, 2);
+    request.shape = TraceShape::Line;
+    read_options(state, 3, request);
+    request.use_hull = request.shape == TraceShape::Hull;
+    return run(state, request);
+}
+
+int hull(lua_State* state) {
+    TraceRequest request;
+    request.start = read_vector(state, 1);
+    request.end = read_vector(state, 2);
+    request.mins = read_vector(state, 3);
+    request.maxs = read_vector(state, 4);
+    request.shape = TraceShape::Hull;
+    request.use_hull = true;
+    read_options(state, 5, request);
+    request.shape = TraceShape::Hull;
+    request.use_hull = true;
+    return run(state, request);
+}
+
+int cast(lua_State* state) {
+    luaL_checktype(state, 1, LUA_TTABLE);
+    TraceRequest request;
+    if (!read_optional_vector(state, 1, "start", request.start) ||
+        !read_optional_vector(state, 1, "end", request.end)) {
+        return luaL_error(state, "trace request requires start and end vectors");
+    }
+    read_options(state, 1, request);
+    request.use_hull = request.shape == TraceShape::Hull;
+    return run(state, request);
+}
+
+int ray(lua_State* state) { return line(state); }
 
 void add_function(lua_State* state, const Services* api, const char* name,
                   lua_CFunction function) {
@@ -173,6 +321,114 @@ void add_mask(lua_State* state, const char* name, std::uint64_t value) {
     lua_pushinteger(state, static_cast<lua_Integer>(value));
     lua_setfield(state, -2, name);
 }
+
+constexpr std::uint64_t TRACE_SOLID = 0x1ull;
+constexpr std::uint64_t TRACE_HITBOXES = 0x2ull;
+constexpr std::uint64_t TRACE_TRIGGER = 0x4ull;
+constexpr std::uint64_t TRACE_SKY = 0x8ull;
+constexpr std::uint64_t TRACE_PLAYER_CLIP = 0x10ull;
+constexpr std::uint64_t TRACE_NPC_CLIP = 0x20ull;
+constexpr std::uint64_t TRACE_BLOCK_LOS = 0x40ull;
+constexpr std::uint64_t TRACE_BLOCK_LIGHT = 0x80ull;
+constexpr std::uint64_t TRACE_LADDER = 0x100ull;
+constexpr std::uint64_t TRACE_PICKUP = 0x200ull;
+constexpr std::uint64_t TRACE_BLOCK_SOUND = 0x400ull;
+constexpr std::uint64_t TRACE_NODRAW = 0x800ull;
+constexpr std::uint64_t TRACE_WINDOW = 0x1000ull;
+constexpr std::uint64_t TRACE_PASS_BULLETS = 0x2000ull;
+constexpr std::uint64_t TRACE_WORLD_GEOMETRY = 0x4000ull;
+constexpr std::uint64_t TRACE_WATER = 0x8000ull;
+constexpr std::uint64_t TRACE_SLIME = 0x10000ull;
+constexpr std::uint64_t TRACE_TOUCH_ALL = 0x20000ull;
+constexpr std::uint64_t TRACE_PLAYER = 0x40000ull;
+constexpr std::uint64_t TRACE_NPC = 0x80000ull;
+constexpr std::uint64_t TRACE_DEBRIS = 0x100000ull;
+constexpr std::uint64_t TRACE_PHYSICS_PROP = 0x200000ull;
+constexpr std::uint64_t TRACE_NAV_IGNORE = 0x400000ull;
+constexpr std::uint64_t TRACE_NAV_LOCAL_IGNORE = 0x800000ull;
+constexpr std::uint64_t TRACE_POST_PROCESSING_VOLUME = 0x1000000ull;
+constexpr std::uint64_t TRACE_CARRIED_OBJECT = 0x4000000ull;
+constexpr std::uint64_t TRACE_PUSH_AWAY = 0x8000000ull;
+constexpr std::uint64_t TRACE_SERVER_ENTITY_ON_CLIENT = 0x10000000ull;
+constexpr std::uint64_t TRACE_CARRIED_WEAPON = 0x20000000ull;
+constexpr std::uint64_t TRACE_STATIC_LEVEL = 0x40000000ull;
+constexpr std::uint64_t TRACE_CSGO_TEAM1 = 0x80000000ull;
+constexpr std::uint64_t TRACE_CSGO_TEAM2 = 0x100000000ull;
+constexpr std::uint64_t TRACE_CSGO_GRENADE_CLIP = 0x200000000ull;
+constexpr std::uint64_t TRACE_CSGO_DRONE_CLIP = 0x400000000ull;
+constexpr std::uint64_t TRACE_CSGO_MOVEABLE = 0x800000000ull;
+constexpr std::uint64_t TRACE_CSGO_OPAQUE = 0x1000000000ull;
+constexpr std::uint64_t TRACE_CSGO_MONSTER = 0x2000000000ull;
+constexpr std::uint64_t TRACE_CSGO_THROWN_GRENADE = 0x8000000000ull;
+
+constexpr std::uint64_t MASK_SHOT_PHYSICS =
+    TRACE_SOLID | TRACE_PLAYER_CLIP | TRACE_WINDOW | TRACE_PASS_BULLETS |
+    TRACE_PLAYER | TRACE_NPC | TRACE_PHYSICS_PROP;
+constexpr std::uint64_t MASK_SHOT_HITBOX =
+    TRACE_HITBOXES | TRACE_PLAYER | TRACE_NPC;
+constexpr std::uint64_t MASK_SHOT_FULL = MASK_SHOT_PHYSICS | TRACE_HITBOXES;
+constexpr std::uint64_t MASK_WORLD_ONLY =
+    TRACE_SOLID | TRACE_WINDOW | TRACE_PASS_BULLETS;
+constexpr std::uint64_t MASK_GRENADE =
+    TRACE_SOLID | TRACE_WINDOW | TRACE_PHYSICS_PROP | TRACE_PASS_BULLETS;
+constexpr std::uint64_t MASK_PLAYER_MOVE =
+    TRACE_SOLID | TRACE_WINDOW | TRACE_PLAYER_CLIP | TRACE_PASS_BULLETS;
+
+void add_trace_constants(lua_State* state) {
+#define ADD(name) add_mask(state, #name, name)
+    ADD(TRACE_SOLID);
+    ADD(TRACE_HITBOXES);
+    ADD(TRACE_TRIGGER);
+    ADD(TRACE_SKY);
+    ADD(TRACE_PLAYER_CLIP);
+    ADD(TRACE_NPC_CLIP);
+    ADD(TRACE_BLOCK_LOS);
+    ADD(TRACE_BLOCK_LIGHT);
+    ADD(TRACE_LADDER);
+    ADD(TRACE_PICKUP);
+    ADD(TRACE_BLOCK_SOUND);
+    ADD(TRACE_NODRAW);
+    ADD(TRACE_WINDOW);
+    ADD(TRACE_PASS_BULLETS);
+    ADD(TRACE_WORLD_GEOMETRY);
+    ADD(TRACE_WATER);
+    ADD(TRACE_SLIME);
+    ADD(TRACE_TOUCH_ALL);
+    ADD(TRACE_PLAYER);
+    ADD(TRACE_NPC);
+    ADD(TRACE_DEBRIS);
+    ADD(TRACE_PHYSICS_PROP);
+    ADD(TRACE_NAV_IGNORE);
+    ADD(TRACE_NAV_LOCAL_IGNORE);
+    ADD(TRACE_POST_PROCESSING_VOLUME);
+    ADD(TRACE_CARRIED_OBJECT);
+    ADD(TRACE_PUSH_AWAY);
+    ADD(TRACE_SERVER_ENTITY_ON_CLIENT);
+    ADD(TRACE_CARRIED_WEAPON);
+    ADD(TRACE_STATIC_LEVEL);
+    ADD(TRACE_CSGO_TEAM1);
+    ADD(TRACE_CSGO_TEAM2);
+    ADD(TRACE_CSGO_GRENADE_CLIP);
+    ADD(TRACE_CSGO_DRONE_CLIP);
+    ADD(TRACE_CSGO_MOVEABLE);
+    ADD(TRACE_CSGO_OPAQUE);
+    ADD(TRACE_CSGO_MONSTER);
+    ADD(TRACE_CSGO_THROWN_GRENADE);
+    ADD(MASK_SHOT_PHYSICS);
+    ADD(MASK_SHOT_HITBOX);
+    ADD(MASK_SHOT_FULL);
+    ADD(MASK_WORLD_ONLY);
+    ADD(MASK_GRENADE);
+    ADD(MASK_PLAYER_MOVE);
+#undef ADD
+    add_mask(state, "MASK_ALL", 0xFFFFFFFFFFFFFFFFull);
+    add_mask(state, "SHAPE_LINE", static_cast<std::uint64_t>(TraceShape::Line));
+    add_mask(state, "SHAPE_SPHERE",
+             static_cast<std::uint64_t>(TraceShape::Sphere));
+    add_mask(state, "SHAPE_HULL", static_cast<std::uint64_t>(TraceShape::Hull));
+    add_mask(state, "SHAPE_CAPSULE",
+             static_cast<std::uint64_t>(TraceShape::Capsule));
+}
 } // namespace
 
 LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
@@ -183,16 +439,11 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     if (!advanced()) {
         return luaL_error(state, "LuaCS advanced world services are unavailable");
     }
-    lua_createtable(state, 0, 24);
+    lua_createtable(state, 0, 64);
+    add_function(state, api, "cast", &cast);
     add_function(state, api, "ray", &ray);
     add_function(state, api, "line", &line);
     add_function(state, api, "hull", &hull);
-    add_mask(state, "MASK_ALL", 0xFFFFFFFFFFFFFFFFull);
-    add_mask(state, "MASK_SOLID", 0x1ull);
-    add_mask(state, "MASK_PLAYERSOLID", 0x200400Bull);
-    add_mask(state, "MASK_SHOT", 0x4600400Bull);
-    add_mask(state, "MASK_SHOT_HULL", 0x600400Bull);
-    add_mask(state, "MASK_VISIBLE", 0x46004003ull);
-    add_mask(state, "MASK_WATER", 0x20ull);
+    add_trace_constants(state);
     return 1;
 }
