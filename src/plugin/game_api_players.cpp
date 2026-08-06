@@ -481,8 +481,8 @@ bool LuaCSGameApiImpl::weapon_switch(int slot, int entity_index,
 
 bool LuaCSGameApiImpl::weapon_set_clip(int entity_index, int clip_index,
                                        int value, std::string& error) const {
-    if (clip_index != 1 && clip_index != 2) {
-        error = "clip index must be 1 or 2";
+    if (clip_index != 0 && clip_index != 1) {
+        error = "clip selector must be 0 or 1";
         return false;
     }
     CEntityInstance* weapon = entity_by_index(entity_index);
@@ -490,7 +490,7 @@ bool LuaCSGameApiImpl::weapon_set_clip(int entity_index, int clip_index,
         error = "weapon entity index is invalid";
         return false;
     }
-    const auto offset = clip_index == 1 ? clip1_offset : clip2_offset;
+    const auto offset = clip_index == 0 ? clip1_offset : clip2_offset;
     field<int>(weapon, offset) = value;
     state_changed(weapon, static_cast<std::uint32_t>(offset));
     return true;
@@ -499,8 +499,8 @@ bool LuaCSGameApiImpl::weapon_set_clip(int entity_index, int clip_index,
 bool LuaCSGameApiImpl::weapon_set_reserve(int entity_index,
                                           int reserve_index, int value,
                                           std::string& error) const {
-    if (reserve_index != 1 && reserve_index != 2) {
-        error = "reserve index must be 1 or 2";
+    if (reserve_index != 0 && reserve_index != 1) {
+        error = "reserve selector must be 0 or 1";
         return false;
     }
     CEntityInstance* weapon = entity_by_index(entity_index);
@@ -510,9 +510,9 @@ bool LuaCSGameApiImpl::weapon_set_reserve(int entity_index,
     }
     auto* reserve = reinterpret_cast<int*>(
         reinterpret_cast<std::uint8_t*>(weapon) + reserve_ammo_offset);
-    reserve[reserve_index - 1] = value;
+    reserve[reserve_index] = value;
     state_changed(weapon, static_cast<std::uint32_t>(reserve_ammo_offset),
-                  reserve_index - 1);
+                  reserve_index);
     return true;
 }
 
