@@ -60,6 +60,10 @@ struct SoundInfo {
 };
 
 struct WorldServices {
+    using EntityGetCallback = bool (*)(void* context, int entity_index,
+                                       EntityInfo* output, char* error,
+                                       std::size_t error_size);
+
     std::uint32_t abi_version{kWorldServicesAbiVersion};
     void* context{};
 
@@ -77,8 +81,10 @@ struct WorldServices {
     bool (*round_set_frozen)(void* context, bool frozen,
                              char* error, std::size_t error_size){};
 
-    bool (*entity_get)(void* context, int entity_index, EntityInfo* output,
-                       char* error, std::size_t error_size){};
+    union {
+        EntityGetCallback entity_get;
+        EntityGetCallback entity_info;
+    };
     std::size_t (*entity_count)(void* context, const char* pattern,
                                 bool by_name, char* error,
                                 std::size_t error_size){};
