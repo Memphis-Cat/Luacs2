@@ -1,12 +1,25 @@
+#include "game_api_internal.h"
 #include "luacs/advanced_world_api.h"
+#include "luacs/world_api.h"
 
+#include <gametrace.h>
+#include <schemasystem/schemasystem.h>
 #include <schemasystem/schematypes.h>
+#include <tier1/utlstring.h>
+#include <tier1/utlsymbollarge.h>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <climits>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <limits>
+#include <optional>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,13 +36,21 @@ luacs::PropertyKind classify(CSchemaType* type, std::uint16_t& width,
 
 } // namespace
 
+// The adapter is the compatibility boundary around the implementation file. It
+// needs access to the resolved native trace entry points so ABI v2 can use the
+// real Source 2 CTraceFilter rather than dropping its new filter fields.
+#define private public
 #include "game_api_advanced.cpp"
+#undef private
 
 namespace {
 
 using luacs::PropertyInfo;
 using luacs::PropertyKind;
 using luacs::RawPropertyValue;
+using luacs::TraceRequest;
+using luacs::TraceResult;
+using luacs::TraceShape;
 
 luacs::PropertyKind classify(CSchemaType* type, std::uint16_t& width,
                              std::uint16_t& array_count,
@@ -504,6 +525,161 @@ bool property_child_at_v2(void* context, int entity_index,
                             error_size);
 }
 
+bool finite_vector(const luacs::Vector3& value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) &&
+           std::isfinite(value.z);
+}
+
+bool append_ignore(int value, int* output, std::size_t& count) {
+    if (value < 0) return true;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (output[index] == value) return true;
+    }
+    if (count >= 2) return false;
+    output[count++] = value;
+    return true;
+}
+
+bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
+              char* error, std::size_t error_size) {
+    if (error && error_size) error[0] = '\0';
+    if (!context || !request || !output) {
+        write_error(error, error_size, "trace context, request, or output is null");
+        return false;
+    }
+    if (!finite_vector(request->start) || !finite_vector(request->end)) {
+        write_error(error, error_size, "trace coordinates must be finite");
+        return false;
+    }
+    if (request->ignore_count > luacs::kTraceIgnoreCapacity) {
+        write_error(error, error_size, "trace ignore count exceeds ABI capacity");
+        return false;
+    }
+
+    const TraceShape shape =
+        request->use_hull ? TraceShape::Hull : request->shape;
+    if (shape == TraceShape::Sphere || shape == TraceShape::Capsule) {
+        write_error(error, error_size,
+                    "sphere and capsule traces require a verified native Ray_t layout and are not enabled yet");
+        return false;
+    }
+
+    int ignored[2]{-1, -1};
+    std::size_t ignored_count{};
+    if (!append_ignore(request->ignore_entity_index, ignored, ignored_count)) {
+        write_error(error, error_size,
+                    "the current Source 2 CTraceFilter supports two ignored entities");
+        return false;
+    }
+    for (std::size_t index = 0; index < request->ignore_count; ++index) {
+        if (!append_ignore(request->ignore_entities[index], ignored,
+                           ignored_count)) {
+            write_error(error, error_size,
+                        "the current Source 2 CTraceFilter supports two ignored entities");
+            return false;
+        }
+    }
+
+    auto* api = static_cast<LuaCSAdvancedApi*>(context);
+    std::string message;
+    if (!api->ready(message)) {
+        write_error(error, error_size, message);
+        return false;
+    }
+
+    const std::uint64_t interacts_with =
+        request->interacts_with
+            ? request->interacts_with
+            : (request->contents ? request->contents : request->contents_mask);
+    const int collision_group = static_cast<int>(request->collision_group);
+    const bool iterate_entities = request->iterate_entities && request->hit_entities;
+
+    CTraceFilter filter(interacts_with, collision_group, iterate_entities);
+    filter.m_nInteractsAs = request->interacts_as;
+    filter.m_nInteractsWith = interacts_with;
+    filter.m_nInteractsExclude = request->interacts_exclude;
+    filter.m_nObjectSetMask = static_cast<std::uint8_t>(
+        request->ignore_entities_mask ? request->ignore_entities_mask : 0x0F);
+    filter.m_nCollisionGroup = collision_group;
+    filter.m_bHitSolid = request->hit_solid;
+    filter.m_bHitTrigger = request->hit_triggers;
+    filter.m_bForceHitEverything = request->force_hit_everything;
+    filter.m_bIterateEntities = iterate_entities;
+    if (ignored_count > 0) filter.SetPassEntity1(api->entity(ignored[0]));
+    if (ignored_count > 1) filter.SetPassEntity2(api->entity(ignored[1]));
+
+    LuaCSAdvancedApi::NativeRay ray;
+    if (shape == TraceShape::Hull) {
+        if (!finite_vector(request->mins) || !finite_vector(request->maxs)) {
+            write_error(error, error_size, "hull bounds must be finite");
+            return false;
+        }
+        auto* bounds = reinterpret_cast<Vector*>(ray.data.data());
+        bounds[0] = Vector(request->mins.x, request->mins.y, request->mins.z);
+        bounds[1] = Vector(request->maxs.x, request->maxs.y, request->maxs.z);
+        ray.type = 2;
+    } else {
+        ray.type = 0;
+    }
+
+    const Vector start(request->start.x, request->start.y, request->start.z);
+    const Vector end(request->end.x, request->end.y, request->end.z);
+    CGameTrace native;
+    if (!api->trace_shape_(api->trace_manager_, &ray, &start, &end, &filter,
+                           &native)) {
+        write_error(error, error_size,
+                    "Source 2 TraceShape rejected the request");
+        return false;
+    }
+
+    *output = {};
+    output->valid = true;
+    output->hit = native.DidHit();
+    output->start_solid = native.m_bStartInSolid;
+    output->all_solid =
+        native.m_bStartInSolid && native.m_flFraction <= 0.0f;
+    output->exact_hit_point = native.m_bExactHitPoint;
+    output->fraction = native.m_flFraction;
+    output->hit_offset = native.m_flHitOffset;
+    output->shape = shape;
+    output->start = {native.m_vStartPos.x, native.m_vStartPos.y,
+                     native.m_vStartPos.z};
+    output->end = {native.m_vEndPos.x, native.m_vEndPos.y,
+                   native.m_vEndPos.z};
+    output->hit_position = {native.m_vHitPoint.x, native.m_vHitPoint.y,
+                            native.m_vHitPoint.z};
+    output->plane_normal = {native.m_vHitNormal.x, native.m_vHitNormal.y,
+                            native.m_vHitNormal.z};
+    output->contents = static_cast<int>(native.m_nContents);
+    output->triangle = native.m_nTriangle;
+    output->bone = native.m_nHitboxBoneIndex;
+
+    const float delta_x = output->hit_position.x - output->start.x;
+    const float delta_y = output->hit_position.y - output->start.y;
+    const float delta_z = output->hit_position.z - output->start.z;
+    output->distance =
+        std::sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z);
+    output->plane_distance =
+        output->plane_normal.x * output->hit_position.x +
+        output->plane_normal.y * output->hit_position.y +
+        output->plane_normal.z * output->hit_position.z;
+
+    if (native.m_pEnt && native.m_pEnt->m_pEntity) {
+        output->entity_index = native.m_pEnt->GetEntityIndex().Get();
+        output->entity_handle = native.m_pEnt->GetRefEHandle().ToInt();
+    }
+    if (native.m_pHitbox) {
+        output->hitbox = native.m_pHitbox->m_nHitBoxIndex;
+        output->hitgroup = native.m_pHitbox->m_nGroupId;
+    }
+    if (native.m_pSurfaceProperties) {
+        const char* name = native.m_pSurfaceProperties->m_name.String();
+        copy_text(output->surface_name, sizeof(output->surface_name),
+                  name ? name : "");
+    }
+    return true;
+}
+
 struct AdvancedWorldV2Registration {
     AdvancedWorldV2Registration() {
         auto& services = g_advanced_api.services;
@@ -515,6 +691,7 @@ struct AdvancedWorldV2Registration {
         services.property_collection_resize = &property_collection_resize_v2;
         services.property_child_count = &property_child_count_v2;
         services.property_child_at = &property_child_at_v2;
+        services.trace = &trace_v2;
     }
 };
 
