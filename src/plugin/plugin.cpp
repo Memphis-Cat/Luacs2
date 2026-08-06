@@ -28,6 +28,8 @@ SH_DECL_HOOK6_void(IServerGameClients, OnClientConnected, SH_NOATTRIB, 0,
                    bool);
 SH_DECL_HOOK2_void(IServerGameClients, ClientCommand, SH_NOATTRIB, 0,
                    CPlayerSlot, const CCommand&);
+SH_DECL_HOOK2(IGameEventManager2, LoadEventsFromFile, SH_NOATTRIB, 0, int,
+              const char*, bool);
 SH_DECL_HOOK2(IGameEventManager2, FireEvent, SH_NOATTRIB, 0, bool,
               IGameEvent*, bool);
 
@@ -180,8 +182,6 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
 
     GET_V_IFACE_CURRENT(GetEngineFactory, g_engine, IVEngineServer,
                         INTERFACEVERSION_VENGINESERVER);
-    GET_V_IFACE_CURRENT(GetEngineFactory, g_game_events, IGameEventManager2,
-                        INTERFACEVERSION_GAMEEVENTSMANAGER2);
     GET_V_IFACE_ANY(GetServerFactory, g_server, IServerGameDLL,
                     INTERFACEVERSION_SERVERGAMEDLL);
     GET_V_IFACE_ANY(GetServerFactory, g_game_clients, IServerGameClients,
@@ -216,7 +216,19 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         copy_error(error, maxlen, message);
         return false;
     }
-    game_api_.set_event_manager(g_game_events);
+
+    auto* event_manager_vtable = reinterpret_cast<IGameEventManager2*>(
+        game_api_.event_manager_vtable());
+    if (!event_manager_vtable) {
+        game_api_.shutdown();
+        const std::string message =
+            "Could not resolve the CGameEventManager virtual table required "
+            "for Source 2 dynamic virtual hooks.";
+        write_console("[ERROR] (lua) " + message);
+        copy_error(error, maxlen, message);
+        return false;
+    }
+
     if (!game_api_error.empty()) {
         write_console("[WARN] (lua) " + game_api_error);
     }
@@ -256,11 +268,14 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         return false;
     }
 
-    fire_event_pre_hook_id_ = SH_ADD_HOOK(
-        IGameEventManager2, FireEvent, g_game_events,
+    load_events_hook_id_ = SH_ADD_DVPHOOK(
+        IGameEventManager2, LoadEventsFromFile, event_manager_vtable,
+        SH_MEMBER(this, &LuaCSPlugin::Hook_LoadEventsFromFile), false);
+    fire_event_pre_hook_id_ = SH_ADD_DVPHOOK(
+        IGameEventManager2, FireEvent, event_manager_vtable,
         SH_MEMBER(this, &LuaCSPlugin::Hook_FireEvent), false);
-    fire_event_post_hook_id_ = SH_ADD_HOOK(
-        IGameEventManager2, FireEvent, g_game_events,
+    fire_event_post_hook_id_ = SH_ADD_DVPHOOK(
+        IGameEventManager2, FireEvent, event_manager_vtable,
         SH_MEMBER(this, &LuaCSPlugin::Hook_FireEventPost), true);
     game_frame_hook_id_ = SH_ADD_HOOK(
         IServerGameDLL, GameFrame, g_server,
@@ -282,6 +297,8 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
 
     std::vector<std::string_view> failed_hooks;
+    if (load_events_hook_id_ <= 0)
+        failed_hooks.push_back("IGameEventManager2::LoadEventsFromFile capture");
     if (fire_event_pre_hook_id_ <= 0)
         failed_hooks.push_back("IGameEventManager2::FireEvent pre");
     if (fire_event_post_hook_id_ <= 0)
@@ -318,7 +335,7 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
     }
 
     g_SMAPI->AddListener(this, this);
-    write_console("[INFO] (lua) Installed all 8 required Source 2 hooks.");
+    write_console("[INFO] (lua) Installed all 9 required Source 2 hooks.");
     runtime_.load_plugins();
     write_console("[INFO] (lua) LuaCS startup completed successfully.");
     return true;
@@ -347,6 +364,7 @@ void LuaCSPlugin::remove_hooks() {
     remove(client_put_in_server_hook_id_);
     remove(client_connected_hook_id_);
     remove(client_command_hook_id_);
+    remove(load_events_hook_id_);
     remove(fire_event_pre_hook_id_);
     remove(fire_event_post_hook_id_);
 }
@@ -396,10 +414,28 @@ void LuaCSPlugin::Hook_ClientCommand(CPlayerSlot slot,
     runtime_.client_command(slot.Get(), command.GetCommandString());
 }
 
+int LuaCSPlugin::Hook_LoadEventsFromFile(const char*, bool) {
+    auto* manager = META_IFACEPTR(IGameEventManager2);
+    if (manager) {
+        const bool first_capture = g_game_events != manager;
+        g_game_events = manager;
+        game_api_.set_event_manager(manager);
+        if (first_capture) {
+            write_console(
+                "[INFO] (lua) Captured the live IGameEventManager2 instance.");
+        }
+    }
+    RETURN_META_VALUE(MRES_IGNORED, 0);
+}
+
 bool LuaCSPlugin::Hook_FireEvent(IGameEvent* event, bool dont_broadcast) {
     auto* manager = META_IFACEPTR(IGameEventManager2);
-    if (!manager) manager = g_game_events;
-    game_api_.set_event_manager(manager);
+    if (manager) {
+        g_game_events = manager;
+        game_api_.set_event_manager(manager);
+    } else {
+        manager = g_game_events;
+    }
 
     if (!manager || !event) {
         event_copies_.push_back(nullptr);
@@ -427,6 +463,12 @@ bool LuaCSPlugin::Hook_FireEvent(IGameEvent* event, bool dont_broadcast) {
 }
 
 bool LuaCSPlugin::Hook_FireEventPost(IGameEvent*, bool dont_broadcast) {
+    auto* live_manager = META_IFACEPTR(IGameEventManager2);
+    if (live_manager) {
+        g_game_events = live_manager;
+        game_api_.set_event_manager(live_manager);
+    }
+
     IGameEvent* copy = nullptr;
     if (!event_copies_.empty()) {
         copy = event_copies_.back();
