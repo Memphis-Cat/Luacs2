@@ -33,17 +33,53 @@ struct PlayerSnapshot {
 };
 
 struct HostOperations {
-    std::function<bool(int slot, int destination, std::string_view message,
-                       std::string& error)> hud_print;
-    std::function<bool(std::string_view name)> cvar_exists;
-    std::function<bool(std::string_view name, std::string& value,
-                       std::string& error)> cvar_get;
-    std::function<bool(std::string_view name, std::string_view value,
-                       std::string& error)> cvar_set;
-    std::function<bool(int slot, std::string_view class_name,
-                       std::string& error)> weapon_give;
-    std::function<bool(int slot, std::string& error)> weapon_remove_all;
-    std::function<bool(int slot, std::string& error)> weapon_drop_active;
+    std::function<bool(std::uint64_t, std::string_view)> event_has_key;
+    std::function<bool(std::uint64_t, std::string_view)> event_is_empty;
+    std::function<bool(std::uint64_t, std::string_view, bool, bool&)> event_get_bool;
+    std::function<bool(std::uint64_t, std::string_view, int, int&)> event_get_int;
+    std::function<bool(std::uint64_t, std::string_view, std::uint64_t,
+                       std::uint64_t&)> event_get_uint64;
+    std::function<bool(std::uint64_t, std::string_view, float, float&)> event_get_float;
+    std::function<bool(std::uint64_t, std::string_view, std::string_view,
+                       std::string&)> event_get_string;
+    std::function<bool(std::uint64_t, std::string_view, int&)> event_get_player_slot;
+    std::function<bool(std::uint64_t, std::string_view, int&)> event_get_entity_index;
+    std::function<bool(std::uint64_t, std::string_view, int&)> event_get_pawn_index;
+    std::function<bool(std::uint64_t, std::string_view, bool)> event_set_bool;
+    std::function<bool(std::uint64_t, std::string_view, int)> event_set_int;
+    std::function<bool(std::uint64_t, std::string_view, std::uint64_t)> event_set_uint64;
+    std::function<bool(std::uint64_t, std::string_view, float)> event_set_float;
+    std::function<bool(std::uint64_t, std::string_view, std::string_view)> event_set_string;
+    std::function<bool(std::uint64_t)> event_cancel;
+    std::function<bool(std::uint64_t, bool)> event_set_dont_broadcast;
+
+    std::function<bool(int, PlayerState&, std::string&)> player_state;
+    std::function<bool(int, PlayerIntField, int, std::string&)> player_set_int;
+    std::function<bool(int, PlayerBoolField, bool, std::string&)> player_set_bool;
+    std::function<bool(int, const Vector3*, const Vector3*, const Vector3*,
+                       std::string&)> player_teleport;
+    std::function<bool(int, bool, std::string&)> player_kill;
+    std::function<bool(int, std::string&)> player_respawn;
+    std::function<bool(int, int, bool, std::string&)> player_change_team;
+
+    std::function<bool(int, int, std::string_view, std::string&)> hud_print;
+    std::function<bool(std::string_view)> cvar_exists;
+    std::function<bool(std::string_view, std::string&, std::string&)> cvar_get;
+    std::function<bool(std::string_view, std::string_view, std::string&)> cvar_set;
+
+    std::function<bool(int, std::string_view, WeaponInfo&, std::string&)> weapon_give;
+    std::function<bool(int, std::string&)> weapon_remove_all;
+    std::function<bool(int, std::string&)> weapon_drop_active;
+    std::function<std::size_t(int, std::string&)> weapon_count;
+    std::function<bool(int, std::size_t, WeaponInfo&, std::string&)> weapon_at;
+    std::function<bool(int, WeaponInfo&, std::string&)> weapon_get;
+    std::function<bool(int, int, bool, std::string&)> weapon_remove;
+    std::function<bool(int, int, std::string&)> weapon_drop;
+    std::function<bool(int, int, std::string&)> weapon_switch;
+    std::function<bool(int, int, int, std::string&)> weapon_set_clip;
+    std::function<bool(int, int, int, std::string&)> weapon_set_reserve;
+    std::function<bool(int, int, int&, std::string&)> weapon_get_ammo;
+    std::function<bool(int, int, int, std::string&)> weapon_set_ammo;
 };
 
 class Runtime {
@@ -74,12 +110,17 @@ public:
                              std::string_view steam_id);
     void client_command(int slot, std::string_view command_line);
 
+    void dispatch_game_event(std::uint64_t token, std::string_view name, int id,
+                             bool reliable, bool local, bool post,
+                             bool dont_broadcast);
     double now() const;
 
 private:
     struct EventCallback {
+        std::uint64_t subscription_id{};
         int reference{LUA_NOREF};
         EventCallbackMode mode{EventCallbackMode::EventTable};
+        bool post{false};
     };
 
     struct Timer {
@@ -120,6 +161,7 @@ private:
     std::unordered_map<lua_State*, ScriptVm*> state_map_;
     std::unordered_map<int, PlayerSnapshot> players_;
     std::uint64_t next_timer_id_{1};
+    std::uint64_t next_event_subscription_id_{1};
     Services services_{};
 
     bool load_plugin(const std::filesystem::path& path);
@@ -135,34 +177,87 @@ private:
     ScriptVm* find_vm(lua_State* state);
     const ScriptVm* find_vm(lua_State* state) const;
     static Runtime* from_services(void* context);
+    const PlayerSnapshot* player_snapshot(int slot) const;
 
     static void service_log(void* context, lua_State* state, const char* text);
     static double service_now(void* context);
-    static bool service_event_on(void* context, lua_State* state, const char* event_name,
-                                 int callback_index, EventCallbackMode mode);
-    static std::uint64_t service_timer_add(void* context, lua_State* state, double delay_seconds,
-                                           bool repeat, int callback_index);
-    static bool service_timer_cancel(void* context, lua_State* state, std::uint64_t timer_id);
-    static bool service_player_get(void* context, int slot, PlayerInfo* output);
-    static std::size_t service_player_count(void* context);
-    static bool service_player_at(void* context, std::size_t index, PlayerInfo* output);
-    static bool service_command_on(void* context, lua_State* state, const char* command_name,
-                                   int callback_index);
-    static bool service_hud_print(void* context, int slot, int destination,
-                                  const char* message, char* error,
-                                  std::size_t error_size);
-    static bool service_cvar_exists(void* context, const char* name);
-    static bool service_cvar_get(void* context, const char* name, char* output,
-                                 std::size_t output_size, char* error,
-                                 std::size_t error_size);
-    static bool service_cvar_set(void* context, const char* name, const char* value,
-                                 char* error, std::size_t error_size);
-    static bool service_weapon_give(void* context, int slot, const char* class_name,
-                                    char* error, std::size_t error_size);
-    static bool service_weapon_remove_all(void* context, int slot, char* error,
-                                          std::size_t error_size);
-    static bool service_weapon_drop_active(void* context, int slot, char* error,
-                                           std::size_t error_size);
+    static std::uint64_t service_event_on(void* context, lua_State* state,
+                                          const char* event_name,
+                                          int callback_index,
+                                          EventCallbackMode mode, bool post);
+    static bool service_event_off(void* context, lua_State* state,
+                                  std::uint64_t subscription_id);
+    static bool service_event_has_key(void*, std::uint64_t, const char*);
+    static bool service_event_is_empty(void*, std::uint64_t, const char*);
+    static bool service_event_get_bool(void*, std::uint64_t, const char*, bool,
+                                       bool*);
+    static bool service_event_get_int(void*, std::uint64_t, const char*, int,
+                                      int*);
+    static bool service_event_get_uint64(void*, std::uint64_t, const char*,
+                                         std::uint64_t, std::uint64_t*);
+    static bool service_event_get_float(void*, std::uint64_t, const char*, float,
+                                        float*);
+    static bool service_event_get_string(void*, std::uint64_t, const char*,
+                                         const char*, char*, std::size_t);
+    static bool service_event_get_player_slot(void*, std::uint64_t, const char*,
+                                              int*);
+    static bool service_event_get_entity_index(void*, std::uint64_t, const char*,
+                                               int*);
+    static bool service_event_get_pawn_index(void*, std::uint64_t, const char*,
+                                             int*);
+    static bool service_event_set_bool(void*, std::uint64_t, const char*, bool);
+    static bool service_event_set_int(void*, std::uint64_t, const char*, int);
+    static bool service_event_set_uint64(void*, std::uint64_t, const char*,
+                                         std::uint64_t);
+    static bool service_event_set_float(void*, std::uint64_t, const char*, float);
+    static bool service_event_set_string(void*, std::uint64_t, const char*,
+                                         const char*);
+    static bool service_event_cancel(void*, std::uint64_t);
+    static bool service_event_set_dont_broadcast(void*, std::uint64_t, bool);
+
+    static std::uint64_t service_timer_add(void*, lua_State*, double, bool, int);
+    static bool service_timer_cancel(void*, lua_State*, std::uint64_t);
+    static bool service_player_get(void*, int, PlayerInfo*);
+    static std::size_t service_player_count(void*);
+    static bool service_player_at(void*, std::size_t, PlayerInfo*);
+    static bool service_player_state(void*, int, PlayerState*, char*, std::size_t);
+    static bool service_player_set_int(void*, int, PlayerIntField, int, char*,
+                                       std::size_t);
+    static bool service_player_set_bool(void*, int, PlayerBoolField, bool, char*,
+                                        std::size_t);
+    static bool service_player_teleport(void*, int, const Vector3*,
+                                        const Vector3*, const Vector3*, char*,
+                                        std::size_t);
+    static bool service_player_kill(void*, int, bool, char*, std::size_t);
+    static bool service_player_respawn(void*, int, char*, std::size_t);
+    static bool service_player_change_team(void*, int, int, bool, char*,
+                                           std::size_t);
+    static bool service_command_on(void*, lua_State*, const char*, int);
+    static bool service_hud_print(void*, int, int, const char*, char*,
+                                  std::size_t);
+    static bool service_cvar_exists(void*, const char*);
+    static bool service_cvar_get(void*, const char*, char*, std::size_t, char*,
+                                 std::size_t);
+    static bool service_cvar_set(void*, const char*, const char*, char*,
+                                 std::size_t);
+    static bool service_weapon_give(void*, int, const char*, WeaponInfo*, char*,
+                                    std::size_t);
+    static bool service_weapon_remove_all(void*, int, char*, std::size_t);
+    static bool service_weapon_drop_active(void*, int, char*, std::size_t);
+    static std::size_t service_weapon_count(void*, int, char*, std::size_t);
+    static bool service_weapon_at(void*, int, std::size_t, WeaponInfo*, char*,
+                                  std::size_t);
+    static bool service_weapon_get(void*, int, WeaponInfo*, char*, std::size_t);
+    static bool service_weapon_remove(void*, int, int, bool, char*, std::size_t);
+    static bool service_weapon_drop(void*, int, int, char*, std::size_t);
+    static bool service_weapon_switch(void*, int, int, char*, std::size_t);
+    static bool service_weapon_set_clip(void*, int, int, int, char*, std::size_t);
+    static bool service_weapon_set_reserve(void*, int, int, int, char*,
+                                           std::size_t);
+    static bool service_weapon_get_ammo(void*, int, int, int*, char*,
+                                        std::size_t);
+    static bool service_weapon_set_ammo(void*, int, int, int, char*,
+                                        std::size_t);
 
     static int lua_print(lua_State* state);
     static int lua_vector(lua_State* state);
@@ -180,7 +275,8 @@ private:
                         std::string_view context);
     void push_player(lua_State* state, const PlayerSnapshot& player) const;
     static std::string normalize_name(std::string_view name);
-    static std::pair<std::string, std::string> parse_command(std::string_view command_line);
+    static std::pair<std::string, std::string>
+    parse_command(std::string_view command_line);
 };
 
 } // namespace luacs
