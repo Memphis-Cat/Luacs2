@@ -48,6 +48,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DMMSOURCE_ROOT="%CD%\deps\metamod-source" ^
   -DHL2SDK_CS2_ROOT="%CD%\deps\hl2sdk-cs2" ^
   -DPROTOBUFS_ROOT="%CD%\deps\protobufs" || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\fix-generated-advanced-ray.ps1" -Path "build\generated\advanced\game_api_advanced.cpp" || exit /b 1
 cmake --build build --target luacs_package || exit /b 1
 
 if defined NO_DEPLOY (
