@@ -56,10 +56,17 @@ public:
     const char* GetLogTag() override { return "LUACS"; }
 
 private:
+    void remove_hooks();
     void free_event_copies();
 
     LuaCSGameApi game_api_;
     luacs::Runtime runtime_;
+    int game_frame_hook_id_{-1};
+    int client_active_hook_id_{-1};
+    int client_disconnect_hook_id_{-1};
+    int client_put_in_server_hook_id_{-1};
+    int client_connected_hook_id_{-1};
+    int client_command_hook_id_{-1};
     int fire_event_pre_hook_id_{-1};
     int fire_event_post_hook_id_{-1};
     std::vector<IGameEvent*> event_copies_;
