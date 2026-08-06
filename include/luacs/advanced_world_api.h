@@ -7,12 +7,13 @@
 
 namespace luacs {
 
-inline constexpr std::uint32_t kAdvancedWorldServicesAbiVersion = 2;
+inline constexpr std::uint32_t kAdvancedWorldServicesAbiVersion = 3;
 inline constexpr std::size_t kPropertyNameCapacity = 192;
 inline constexpr std::size_t kPropertyTypeCapacity = 96;
 inline constexpr std::size_t kPropertyStringCapacity = 512;
 inline constexpr std::size_t kPropertyRawCapacity = 4096;
 inline constexpr std::size_t kTraceIgnoreCapacity = 64;
+inline constexpr std::size_t kTraceMeshVertexCapacity = 256;
 
 // Unsupported schema representations are reported explicitly. They are never
 // silently reinterpreted as a different type. Raw access is available through
@@ -76,6 +77,7 @@ enum class TraceShape : std::uint8_t {
     Sphere = 1,
     Hull = 2,
     Capsule = 3,
+    Mesh = 4,
 };
 
 struct TraceRequest {
@@ -108,6 +110,14 @@ struct TraceRequest {
     bool hit_entities{true};
     std::size_t ignore_count{};
     int ignore_entities[kTraceIgnoreCapacity]{};
+
+    // ABI v3 controls. Mesh vertices are copied into this bounded request so
+    // no pointer owned by a Lua module crosses the DLL boundary.
+    bool hit_solid_requires_generate_contacts{};
+    std::uint16_t included_detail_layers{0xFFFFu};
+    std::uint8_t target_detail_layer{};
+    std::size_t mesh_vertex_count{};
+    Vector3 mesh_vertices[kTraceMeshVertexCapacity]{};
 };
 
 struct TraceResult {
@@ -138,6 +148,26 @@ struct TraceResult {
     int bone{-1};
     bool exact_hit_point{};
     TraceShape shape{TraceShape::Line};
+
+    // ABI v3 exposes every stable CGameTrace/shape attribute that is safe to
+    // transfer across the module boundary. Source 2 has no
+    // fraction-left-solid member, so availability is explicit rather than
+    // fabricating a value.
+    bool fraction_left_solid_available{};
+    std::uint64_t contents64{};
+    std::uintptr_t physics_body{};
+    std::uintptr_t physics_shape{};
+    std::uint64_t shape_interacts_as{};
+    std::uint64_t shape_interacts_with{};
+    std::uint64_t shape_interacts_exclude{};
+    std::uint32_t shape_entity_id{};
+    std::uint32_t shape_owner_id{0xFFFFFFFFu};
+    std::uint16_t shape_hierarchy_id{};
+    std::uint16_t shape_detail_layer_mask{};
+    std::uint8_t shape_detail_layer_mask_type{};
+    std::uint8_t shape_target_detail_layer{};
+    std::uint8_t shape_collision_group{};
+    std::uint8_t shape_collision_function_mask{};
 };
 
 enum class GrenadeType : std::uint8_t {
