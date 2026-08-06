@@ -2,6 +2,8 @@
 
 #include "runtime.h"
 
+#include <entity2/entityinstance.h>
+
 #include <filesystem>
 #include <memory>
 #include <string>
