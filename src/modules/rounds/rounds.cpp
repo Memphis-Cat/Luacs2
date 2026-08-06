@@ -49,7 +49,7 @@ void push_state(lua_State* state, const RoundState& value) {
     lua_setfield(state, -2, "restart_time");
 }
 
-int state(lua_State* state) {
+int get_state(lua_State* state) {
     RoundState value;
     char error[256]{};
     if (!read_state(state, value, error, sizeof(error))) return fail(state, error);
@@ -148,8 +148,8 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     }
 
     lua_createtable(state, 0, 36);
-    add_function(state, api, "state", &state);
-    add_function(state, api, "get", &state);
+    add_function(state, api, "state", &get_state);
+    add_function(state, api, "get", &get_state);
     add_function(state, api, "get_number", &get_number);
     add_function(state, api, "is_frozen", &is_frozen);
     add_function(state, api, "restart", &restart);
