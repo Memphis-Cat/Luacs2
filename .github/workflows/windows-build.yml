@@ -10,7 +10,13 @@ concurrency:
 
 jobs:
   build-and-smoke-test:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -31,6 +37,6 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
-          name: LuaCS-Windows-x64
+          name: LuaCS-${{ matrix.os }}-x64
           path: build/package/game/csgo/addons
           if-no-files-found: error
