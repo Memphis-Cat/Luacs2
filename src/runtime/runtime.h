@@ -95,6 +95,7 @@ private:
     std::filesystem::path plugins_dir_;
     std::filesystem::path config_dir_;
     std::filesystem::path logs_dir_;
+    std::filesystem::path core_log_path_;
     std::array<std::uint8_t, 32> key_{};
     ConsoleWriter console_writer_;
     ServerCommand server_command_;

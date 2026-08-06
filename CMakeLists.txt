@@ -30,7 +30,7 @@ add_compile_definitions(
 
 set(LUACS_PACKAGE_ROOT "${CMAKE_BINARY_DIR}/package/game/csgo/addons")
 set(LUACS_ROOT "${LUACS_PACKAGE_ROOT}/LuaCS")
-set(LUACS_BIN "${LUACS_ROOT}/bin")
+set(LUACS_BIN "${LUACS_ROOT}/bin/win64")
 set(LUACS_SCRIPTING "${LUACS_ROOT}/scripting")
 
 function(luacs_runtime_output target directory)
@@ -192,7 +192,9 @@ target_link_libraries(luacs2 PRIVATE
     "${HL2SDK_CS2_ROOT}/lib/public/win64/tier1.lib"
     "${HL2SDK_CS2_ROOT}/lib/public/win64/interfaces.lib"
     "${HL2SDK_CS2_ROOT}/lib/public/win64/mathlib.lib"
+    delayimp
     ws2_32)
+target_link_options(luacs2 PRIVATE "/DELAYLOAD:lua55.dll")
 set_target_properties(luacs2 PROPERTIES OUTPUT_NAME "luacs2")
 luacs_runtime_output(luacs2 "${LUACS_BIN}")
 

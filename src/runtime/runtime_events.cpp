@@ -5,12 +5,73 @@
 #include <windows.h>
 
 #include <fstream>
+#include <ctime>
 #include <sstream>
 
 namespace luacs {
 using namespace detail;
 
+namespace {
+
+struct ParsedLogMessage {
+    std::string_view level{"INFO"};
+    std::string_view message;
+};
+
+ParsedLogMessage parse_level(std::string_view text) {
+    if (text.starts_with("[ERROR]")) {
+        text.remove_prefix(7);
+        while (!text.empty() && text.front() == ' ') text.remove_prefix(1);
+        return {"ERROR", text};
+    }
+    if (text.starts_with("[WARN]")) {
+        text.remove_prefix(6);
+        while (!text.empty() && text.front() == ' ') text.remove_prefix(1);
+        return {"WARN", text};
+    }
+    if (text.starts_with("[DEBUG]")) {
+        text.remove_prefix(7);
+        while (!text.empty() && text.front() == ' ') text.remove_prefix(1);
+        return {"DEBUG", text};
+    }
+    return {"INFO", text};
+}
+
+std::string current_clock() {
+    const auto time_value =
+        std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm local{};
+    localtime_s(&local, &time_value);
+
+    char buffer[16]{};
+    std::strftime(buffer, sizeof(buffer), "%H:%M:%S", &local);
+    return buffer;
+}
+
+std::string format_log_line(std::string_view level, std::string_view source,
+                            std::string_view message) {
+    std::string line;
+    line.reserve(32 + source.size() + message.size());
+    line += current_clock();
+    line += " [";
+    line += level;
+    line += "] (";
+    line += source;
+    line += ") ";
+    line += message;
+    return line;
+}
+
+void append_line(const std::filesystem::path& path, std::string_view line) {
+    if (path.empty()) return;
+    std::ofstream output(path, std::ios::app);
+    if (output) output << line << '\n';
+}
+
+} // namespace
+
 void Runtime::level_init(std::string_view map_name) {
+    log_runtime("Map started: " + std::string(map_name));
     emit("map_start", [&](lua_State* state) {
         lua_newtable(state);
         push_string_field(state, "map", map_name);
@@ -18,6 +79,7 @@ void Runtime::level_init(std::string_view map_name) {
 }
 
 void Runtime::level_shutdown() {
+    log_runtime("Map is shutting down.");
     emit("map_end", [](lua_State* state) { lua_newtable(state); });
 }
 
@@ -27,9 +89,12 @@ void Runtime::player_connected(int slot, std::string_view name, std::uint64_t st
     player.slot = slot;
     player.name = name;
     player.steam64 = steam64;
-    player.steam_id = steam_id.empty() ? steam2_from_steam64(steam64) : std::string(steam_id);
+    player.steam_id =
+        steam_id.empty() ? steam2_from_steam64(steam64) : std::string(steam_id);
     player.fake = fake;
     player.connected = true;
+    log_runtime("Player connected: " + player.name + " (slot " +
+                std::to_string(player.slot) + ")");
     emit_player("player_connect", player);
 }
 
@@ -57,7 +122,9 @@ void Runtime::player_put_in_server(int slot, std::string_view name, std::uint64_
 void Runtime::player_disconnected(int slot, std::string_view name, std::uint64_t steam64,
                                   std::string_view steam_id) {
     PlayerSnapshot player;
-    if (const auto found = players_.find(slot); found != players_.end()) player = found->second;
+    if (const auto found = players_.find(slot); found != players_.end()) {
+        player = found->second;
+    }
     player.slot = slot;
     if (!name.empty()) player.name = name;
     if (steam64) player.steam64 = steam64;
@@ -65,12 +132,16 @@ void Runtime::player_disconnected(int slot, std::string_view name, std::uint64_t
     player.connected = false;
     player.active = false;
     emit_player("player_disconnect", player);
+    log_runtime("Player disconnected: " + player.name + " (slot " +
+                std::to_string(player.slot) + ")");
     players_.erase(slot);
 }
 
 void Runtime::client_command(int slot, std::string_view command_line) {
     const PlayerSnapshot* player = nullptr;
-    if (const auto found = players_.find(slot); found != players_.end()) player = &found->second;
+    if (const auto found = players_.find(slot); found != players_.end()) {
+        player = &found->second;
+    }
 
     emit("client_command", [&](lua_State* state) {
         lua_newtable(state);
@@ -86,7 +157,8 @@ void Runtime::client_command(int slot, std::string_view command_line) {
 }
 
 double Runtime::now() const {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - started_)
+        .count();
 }
 
 void Runtime::emit(std::string_view event_name,
@@ -127,7 +199,11 @@ void Runtime::dispatch_command(const PlayerSnapshot* player, std::string_view na
         auto callbacks = found->second;
         for (int reference : callbacks) {
             lua_rawgeti(vm.state, LUA_REGISTRYINDEX, reference);
-            if (player) push_player(vm.state, *player); else lua_pushnil(vm.state);
+            if (player) {
+                push_player(vm.state, *player);
+            } else {
+                lua_pushnil(vm.state);
+            }
             lua_pushlstring(vm.state, arguments.data(), arguments.size());
             lua_pushlstring(vm.state, raw.data(), raw.size());
             protected_call(vm, 3, 0, std::string("command '") + key + "'");
@@ -136,17 +212,26 @@ void Runtime::dispatch_command(const PlayerSnapshot* player, std::string_view na
 }
 
 void Runtime::log(ScriptVm& vm, std::string_view text) {
-    std::ofstream output(vm.log_path, std::ios::app);
-    if (output) output << text << '\n';
-    log_runtime("[LuaCS:" + vm.name + "] " + std::string(text));
+    const auto parsed = parse_level(text);
+    const auto plugin_line = format_log_line(parsed.level, vm.name, parsed.message);
+    const auto console_line =
+        format_log_line(parsed.level, "lua:" + vm.name, parsed.message);
+
+    append_line(vm.log_path, plugin_line);
+    append_line(core_log_path_, console_line);
+    if (console_writer_) console_writer_(console_line);
 }
 
 void Runtime::log_runtime(std::string_view text) {
-    if (console_writer_) console_writer_(text);
+    const auto parsed = parse_level(text);
+    const auto line = format_log_line(parsed.level, "lua", parsed.message);
+    append_line(core_log_path_, line);
+    if (console_writer_) console_writer_(line);
 }
 
 std::filesystem::path Runtime::create_log_path() const {
-    const auto now_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    const auto now_time =
+        std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm local{};
     localtime_s(&local, &now_time);
     for (std::uint32_t index = 1; index < 1000000; ++index) {
