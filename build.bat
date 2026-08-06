@@ -30,6 +30,13 @@ where cl >nul 2>nul || (
   exit /b 1
 )
 
+set "BUILD_COMMIT="
+for /f "delims=" %%H in ('git rev-parse HEAD 2^>nul') do set "BUILD_COMMIT=%%H"
+if not defined BUILD_COMMIT (
+  echo ERROR: Could not resolve the current Git commit for the build stamp.
+  exit /b 1
+)
+
 set "CC=cl"
 set "CXX=cl"
 
@@ -54,6 +61,10 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DPROTOBUFS_ROOT="%CD%\deps\protobufs" || exit /b 1
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\fix-generated-advanced-ray.ps1" -Path "build\generated\advanced\game_api_advanced.cpp" || exit /b 1
 cmake --build build --target luacs_package || exit /b 1
+
+set "BUILD_STAMP=build\package\game\csgo\addons\LuaCS\build_commit.txt"
+> "%BUILD_STAMP%" echo %BUILD_COMMIT% || exit /b 1
+echo Packaged LuaCS commit: %BUILD_COMMIT%
 
 if defined NO_DEPLOY (
   echo LuaCS build and package completed without deployment.
