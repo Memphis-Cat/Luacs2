@@ -8,6 +8,7 @@ extern "C" {
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -15,13 +16,9 @@ using luacs::AdvancedWorldServices;
 using luacs::PropertyInfo;
 using luacs::PropertyKind;
 using luacs::PropertyValue;
+using luacs::RawPropertyValue;
 using luacs::Services;
 using luacs::Vector3;
-
-const Services* services(lua_State* state) {
-    return static_cast<const Services*>(
-        lua_touserdata(state, lua_upvalueindex(1)));
-}
 
 const AdvancedWorldServices* advanced() {
     return luacs::resolve_advanced_world_services();
@@ -84,12 +81,13 @@ const char* kind_name(PropertyKind kind) {
         case PropertyKind::Angle: return "angle";
         case PropertyKind::EntityHandle: return "entity_handle";
         case PropertyKind::Pointer: return "pointer";
+        case PropertyKind::Raw: return "raw";
         default: return "invalid";
     }
 }
 
 void push_info(lua_State* state, const PropertyInfo& value) {
-    lua_createtable(state, 0, 11);
+    lua_createtable(state, 0, 20);
     lua_pushboolean(state, value.valid);
     lua_setfield(state, -2, "valid");
     lua_pushboolean(state, value.networked);
@@ -110,6 +108,22 @@ void push_info(lua_State* state, const PropertyInfo& value) {
     lua_setfield(state, -2, "name");
     lua_pushstring(state, value.type_name);
     lua_setfield(state, -2, "type_name");
+    lua_pushboolean(state, value.readable);
+    lua_setfield(state, -2, "readable");
+    lua_pushboolean(state, value.fixed_array);
+    lua_setfield(state, -2, "fixed_array");
+    lua_pushboolean(state, value.collection);
+    lua_setfield(state, -2, "collection");
+    lua_pushboolean(state, value.pointer);
+    lua_setfield(state, -2, "pointer");
+    lua_pushboolean(state, value.embedded_class);
+    lua_setfield(state, -2, "embedded_class");
+    lua_pushinteger(state, value.byte_size);
+    lua_setfield(state, -2, "byte_size");
+    lua_pushinteger(state, value.selected_index);
+    lua_setfield(state, -2, "selected_index");
+    lua_pushstring(state, value.owner_class);
+    lua_setfield(state, -2, "owner_class");
 }
 
 void push_value(lua_State* state, const PropertyValue& value) {
@@ -193,7 +207,8 @@ PropertyValue read_value(lua_State* state, int index, PropertyKind kind) {
             }
             break;
         default:
-            luaL_error(state, "property type is not writable");
+            luaL_error(state,
+                       "property type requires properties.get_raw/set_raw");
     }
     return output;
 }
@@ -259,6 +274,92 @@ int set(lua_State* state) {
     return 1;
 }
 
+int get_raw(lua_State* state) {
+    const auto* api = advanced();
+    const int entity = entity_index_from(state, 1);
+    const char* property = luaL_checkstring(state, 2);
+    const int array_index =
+        lua_isnoneornil(state, 3)
+            ? -1
+            : static_cast<int>(luaL_checkinteger(state, 3));
+    RawPropertyValue result;
+    PropertyInfo metadata;
+    char error[256]{};
+    if (!api || !api->property_get_raw ||
+        !api->property_get_raw(api->context, entity, property, array_index,
+                               &result, &metadata, error, sizeof(error))) {
+        return fail(state, error[0] ? error
+                                    : "raw property read service is unavailable");
+    }
+    lua_pushlstring(state, reinterpret_cast<const char*>(result.bytes),
+                    result.size);
+    push_info(state, metadata);
+    return 2;
+}
+
+int set_raw(lua_State* state) {
+    const auto* api = advanced();
+    const int entity = entity_index_from(state, 1);
+    const char* property = luaL_checkstring(state, 2);
+    std::size_t size{};
+    const char* bytes = luaL_checklstring(state, 3, &size);
+    if (size > luacs::kPropertyRawCapacity) {
+        return luaL_error(state, "raw property value exceeds %d bytes",
+                          static_cast<int>(luacs::kPropertyRawCapacity));
+    }
+    const int array_index =
+        lua_isnoneornil(state, 4)
+            ? -1
+            : static_cast<int>(luaL_checkinteger(state, 4));
+    const bool network = lua_isnoneornil(state, 5) || lua_toboolean(state, 5);
+    RawPropertyValue input;
+    input.size = size;
+    if (size) std::memcpy(input.bytes, bytes, size);
+    char error[256]{};
+    if (!api || !api->property_set_raw ||
+        !api->property_set_raw(api->context, entity, property, array_index,
+                               &input, network, error, sizeof(error))) {
+        return fail(state, error[0] ? error
+                                    : "raw property write service is unavailable");
+    }
+    lua_pushboolean(state, true);
+    return 1;
+}
+
+int collection_count(lua_State* state) {
+    const auto* api = advanced();
+    const int entity = entity_index_from(state, 1);
+    const char* property = luaL_checkstring(state, 2);
+    char error[256]{};
+    if (!api || !api->property_collection_count) {
+        return fail(state, "collection count service is unavailable");
+    }
+    const std::size_t count = api->property_collection_count(
+        api->context, entity, property, error, sizeof(error));
+    if (error[0]) return fail(state, error);
+    lua_pushinteger(state, static_cast<lua_Integer>(count));
+    return 1;
+}
+
+int collection_resize(lua_State* state) {
+    const auto* api = advanced();
+    const int entity = entity_index_from(state, 1);
+    const char* property = luaL_checkstring(state, 2);
+    const lua_Integer requested = luaL_checkinteger(state, 3);
+    if (requested < 0) return luaL_error(state, "collection size cannot be negative");
+    const bool network = lua_isnoneornil(state, 4) || lua_toboolean(state, 4);
+    char error[256]{};
+    if (!api || !api->property_collection_resize ||
+        !api->property_collection_resize(
+            api->context, entity, property, static_cast<std::size_t>(requested),
+            network, error, sizeof(error))) {
+        return fail(state, error[0] ? error
+                                    : "collection resize service is unavailable");
+    }
+    lua_pushboolean(state, true);
+    return 1;
+}
+
 int list(lua_State* state) {
     const auto* api = advanced();
     const int entity = entity_index_from(state, 1);
@@ -276,6 +377,34 @@ int list(lua_State* state) {
         error[0] = '\0';
         if (!api->property_at(api->context, entity, inherited, index, &value,
                               error, sizeof(error))) {
+            return fail(state, error);
+        }
+        push_info(state, value);
+        lua_seti(state, -2, static_cast<lua_Integer>(index + 1));
+    }
+    return 1;
+}
+
+int children(lua_State* state) {
+    const auto* api = advanced();
+    const int entity = entity_index_from(state, 1);
+    const char* property = lua_isnoneornil(state, 2)
+                               ? ""
+                               : luaL_checkstring(state, 2);
+    const bool inherited = lua_isnoneornil(state, 3) || lua_toboolean(state, 3);
+    char error[256]{};
+    if (!api || !api->property_child_count || !api->property_child_at) {
+        return fail(state, "child property enumeration service is unavailable");
+    }
+    const std::size_t count = api->property_child_count(
+        api->context, entity, property, inherited, error, sizeof(error));
+    if (error[0]) return fail(state, error);
+    lua_createtable(state, static_cast<int>(count), 0);
+    for (std::size_t index = 0; index < count; ++index) {
+        PropertyInfo value;
+        error[0] = '\0';
+        if (!api->property_child_at(api->context, entity, property, inherited,
+                                    index, &value, error, sizeof(error))) {
             return fail(state, error);
         }
         push_info(state, value);
@@ -307,11 +436,16 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
         return luaL_error(state, "LuaCS advanced world services are unavailable");
     }
 
-    lua_createtable(state, 0, 16);
+    lua_createtable(state, 0, 24);
     add_function(state, api, "info", &info);
     add_function(state, api, "get", &get);
     add_function(state, api, "set", &set);
+    add_function(state, api, "get_raw", &get_raw);
+    add_function(state, api, "set_raw", &set_raw);
+    add_function(state, api, "collection_count", &collection_count);
+    add_function(state, api, "collection_resize", &collection_resize);
     add_function(state, api, "list", &list);
+    add_function(state, api, "children", &children);
     add_constant(state, "BOOLEAN", PropertyKind::Boolean);
     add_constant(state, "SIGNED_INTEGER", PropertyKind::SignedInteger);
     add_constant(state, "UNSIGNED_INTEGER", PropertyKind::UnsignedInteger);
@@ -321,5 +455,6 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     add_constant(state, "ANGLE", PropertyKind::Angle);
     add_constant(state, "ENTITY_HANDLE", PropertyKind::EntityHandle);
     add_constant(state, "POINTER", PropertyKind::Pointer);
+    add_constant(state, "RAW", PropertyKind::Raw);
     return 1;
 }
