@@ -603,6 +603,9 @@ bool trace_v2(void* context, const TraceRequest* request, TraceResult* output,
     filter.m_nCollisionGroup = collision_group;
     filter.m_bHitSolid = request->hit_solid;
     filter.m_bHitTrigger = request->hit_triggers;
+    filter.m_bShouldIgnoreDisabledPairs = request->ignore_disabled_pairs;
+    filter.m_bIgnoreIfBothInteractWithHitboxes =
+        request->ignore_if_both_hitboxes;
     filter.m_bForceHitEverything = request->force_hit_everything;
     filter.m_bIterateEntities = iterate_entities;
     if (ignored_count > 0) filter.SetPassEntity1(api->entity(ignored[0]));
