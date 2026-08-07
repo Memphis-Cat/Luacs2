@@ -37,6 +37,16 @@ if not defined BUILD_COMMIT (
   exit /b 1
 )
 
+rem A commit-only stamp is trustworthy only when all tracked source/index files
+rem match that commit. Untracked build/dependency outputs are intentionally ignored.
+set "TRACKED_DIRTY="
+for /f "delims=" %%S in ('git status --porcelain --untracked-files^=no 2^>nul') do set "TRACKED_DIRTY=1"
+if defined TRACKED_DIRTY (
+  echo ERROR: Refusing to stamp a build from modified or staged tracked files.
+  echo Commit or revert tracked source changes before running build.bat.
+  exit /b 1
+)
+
 set "CC=cl"
 set "CXX=cl"
 
@@ -49,7 +59,9 @@ call :fetch_dependency "deps\protobufs" "https://github.com/SteamTracking/Protob
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\patch-build-dependencies.ps1" || exit /b 1
 
 echo Configuring a clean MSVC x64 build...
-if exist "build" cmake -E remove_directory "build" || exit /b 1
+if exist "build" (
+  cmake -E remove_directory "build" || exit /b 1
+)
 powershell -NoProfile -ExecutionPolicy Bypass -File "tools\generate-disk-backed-game-api.ps1" ^
   -Source "src\plugin\game_api.cpp" ^
   -Destination "build\generated\plugin\game_api.cpp" || exit /b 1
@@ -86,15 +98,43 @@ set "DEP_URL=%~2"
 set "DEP_COMMIT=%~3"
 set "DEP_MARKER=%~4"
 set "DEP_NAME=%~5"
-if exist "%DEP_DIR%\%DEP_MARKER%" exit /b 0
+
+set "DEP_HEAD="
+if exist "%DEP_DIR%\%DEP_MARKER%" if exist "%DEP_DIR%\.git" (
+  for /f "delims=" %%H in ('git -C "%DEP_DIR%" rev-parse HEAD 2^>nul') do set "DEP_HEAD=%%H"
+)
+if /I "%DEP_HEAD%"=="%DEP_COMMIT%" (
+  echo Resetting cached %DEP_NAME% to pinned commit %DEP_COMMIT%...
+  git -C "%DEP_DIR%" reset --hard "%DEP_COMMIT%" >nul || exit /b 1
+  git -C "%DEP_DIR%" clean -fdx >nul || exit /b 1
+  if not exist "%DEP_DIR%\%DEP_MARKER%" (
+    echo ERROR: Cached %DEP_NAME% lost required marker %DEP_MARKER%.
+    exit /b 1
+  )
+  exit /b 0
+)
+
+if exist "%DEP_DIR%" (
+  echo Cached %DEP_NAME% is missing, corrupt, or not at the pinned commit.
+  rmdir /S /Q "%DEP_DIR%"
+  if exist "%DEP_DIR%" (
+    echo ERROR: Could not remove stale dependency directory "%DEP_DIR%".
+    exit /b 1
+  )
+)
 
 echo Fetching %DEP_NAME% at %DEP_COMMIT%...
-if exist "%DEP_DIR%" rmdir /S /Q "%DEP_DIR%"
 mkdir "%DEP_DIR%" || exit /b 1
 git -C "%DEP_DIR%" init || exit /b 1
 git -C "%DEP_DIR%" remote add origin "%DEP_URL%" || exit /b 1
 git -C "%DEP_DIR%" fetch --depth 1 origin "%DEP_COMMIT%" || exit /b 1
 git -C "%DEP_DIR%" checkout --detach FETCH_HEAD || exit /b 1
+set "DEP_HEAD="
+for /f "delims=" %%H in ('git -C "%DEP_DIR%" rev-parse HEAD 2^>nul') do set "DEP_HEAD=%%H"
+if /I not "%DEP_HEAD%"=="%DEP_COMMIT%" (
+  echo ERROR: %DEP_NAME% resolved to %DEP_HEAD% instead of %DEP_COMMIT%.
+  exit /b 1
+)
 if not exist "%DEP_DIR%\%DEP_MARKER%" (
   echo ERROR: %DEP_NAME% did not contain %DEP_MARKER%.
   exit /b 1
