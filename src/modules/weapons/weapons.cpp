@@ -7,6 +7,7 @@ extern "C" {
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 
@@ -85,6 +86,61 @@ bool valid_class_name(std::string_view name) {
     return true;
 }
 
+bool one_of(std::string_view value,
+            std::initializer_list<std::string_view> choices) {
+    return std::find(choices.begin(), choices.end(), value) != choices.end();
+}
+
+std::string_view classify_weapon_slot(std::string_view name) {
+    if (name == "weapon_c4") return "c4";
+
+    if (name == "weapon_bayonet" || name == "weapon_knife" ||
+        name == "weapon_knife_t" || name.starts_with("weapon_knife_")) {
+        return "knife";
+    }
+
+    if (name.ends_with("grenade") ||
+        one_of(name, {"weapon_flashbang", "weapon_molotov", "weapon_decoy",
+                      "weapon_snowball"})) {
+        return "grenade";
+    }
+
+    if (one_of(name,
+               {"weapon_cz75a", "weapon_deagle", "weapon_elite",
+                "weapon_fiveseven", "weapon_glock", "weapon_hkp2000",
+                "weapon_p250", "weapon_revolver", "weapon_tec9",
+                "weapon_usp_silencer"})) {
+        return "secondary";
+    }
+
+    if (one_of(name,
+               {"weapon_ak47", "weapon_aug", "weapon_awp", "weapon_famas",
+                "weapon_g3sg1", "weapon_galilar", "weapon_m4a1",
+                "weapon_m4a1_silencer", "weapon_scar20", "weapon_sg556",
+                "weapon_ssg08", "weapon_bizon", "weapon_mac10",
+                "weapon_mp5sd", "weapon_mp7", "weapon_mp9", "weapon_p90",
+                "weapon_ump45", "weapon_mag7", "weapon_nova",
+                "weapon_sawedoff", "weapon_xm1014", "weapon_m249",
+                "weapon_negev"})) {
+        return "primary";
+    }
+
+    if (name.starts_with("item_") ||
+        one_of(name,
+               {"weapon_taser", "weapon_healthshot", "weapon_shield",
+                "weapon_breachcharge", "weapon_bumpmine", "weapon_tablet",
+                "weapon_zone_repulsor"})) {
+        return "equipment";
+    }
+
+    if (one_of(name, {"weapon_axe", "weapon_fists", "weapon_hammer",
+                      "weapon_melee", "weapon_spanner"})) {
+        return "melee";
+    }
+
+    return "other";
+}
+
 void set_integer(lua_State* state, int table, const char* field,
                  lua_Integer value) {
     table = lua_absindex(state, table);
@@ -111,10 +167,13 @@ void apply_weapon(lua_State* state, int table, const WeaponInfo& weapon) {
     set_integer(state, table, "reserve2", weapon.reserve2);
     lua_pushstring(state, weapon.classname);
     lua_setfield(state, table, "classname");
+    const std::string_view slot = classify_weapon_slot(weapon.classname);
+    lua_pushlstring(state, slot.data(), slot.size());
+    lua_setfield(state, table, "slot");
 }
 
 void push_weapon(lua_State* state, const WeaponInfo& weapon) {
-    lua_createtable(state, 0, 11);
+    lua_createtable(state, 0, 12);
     apply_weapon(state, -1, weapon);
     luaL_getmetatable(state, kWeaponMeta);
     lua_setmetatable(state, -2);
