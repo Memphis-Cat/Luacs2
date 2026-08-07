@@ -180,8 +180,9 @@ $signatureGenerator = Read-Required "tools\generate-disk-backed-game-api.ps1"
 Assert-Contains $signatureGenerator @(
     'VirtualQuery(',
     'readable_memory(',
+    'read_live_value(',
     'PAGE_GUARD | PAGE_NOACCESS',
-    'could not safely apply'
+    'could not safely map to readable live memory'
 ) "signature dereference safety"
 
 $pluginGenerator = Read-Required "tools\generate-server-module-plugin.ps1"
