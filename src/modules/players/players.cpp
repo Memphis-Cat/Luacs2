@@ -1,3 +1,4 @@
+#include "luacs/lua_checked.h"
 #include "luacs/module_api.h"
 
 extern "C" {
@@ -6,7 +7,9 @@ extern "C" {
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -28,13 +31,19 @@ const Services* services(lua_State* state) {
 
 int slot_from(lua_State* state, int index) {
     if (lua_isinteger(state, index)) {
-        return static_cast<int>(lua_tointeger(state, index));
+        return luacs::lua_checked::checked_slot(state, index);
     }
     luaL_checktype(state, index, LUA_TTABLE);
-    lua_getfield(state, index, "slot");
-    const int slot = static_cast<int>(luaL_checkinteger(state, -1));
+    const int table = lua_absindex(state, index);
+    lua_getfield(state, table, "slot");
+    const int slot = luacs::lua_checked::checked_slot(state, -1);
     lua_pop(state, 1);
     return slot;
+}
+
+bool finite_vector(const Vector3& value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) &&
+           std::isfinite(value.z);
 }
 
 void push_vector(lua_State* state, const Vector3& value) {
@@ -59,6 +68,13 @@ void set_bool(lua_State* state, int table, const char* key, bool value) {
     table = lua_absindex(state, table);
     lua_pushboolean(state, value);
     lua_setfield(state, table, key);
+}
+
+bool valid_player_state(const PlayerState& value) {
+    if (!value.valid) return false;
+    if (value.controller_index < -1 || value.pawn_index < -1) return false;
+    return finite_vector(value.position) && finite_vector(value.velocity) &&
+           finite_vector(value.eye_angles);
 }
 
 void apply_state(lua_State* state, int table, const PlayerState& value) {
@@ -94,19 +110,21 @@ void push_player(lua_State* state, const Services* api, const PlayerInfo& player
     set_int(state, -2, "slot", player.slot);
     lua_pushstring(state, player.name ? player.name : "");
     lua_setfield(state, -2, "name");
-    set_int(state, -2, "steam64",
-            static_cast<lua_Integer>(player.steam64));
+    luacs::lua_checked::push_u64_exact(state, player.steam64);
+    lua_setfield(state, -2, "steam64");
     lua_pushstring(state, player.steam_id ? player.steam_id : "");
     lua_setfield(state, -2, "steamid");
     set_bool(state, -2, "fake", player.fake);
     set_bool(state, -2, "connected", player.connected);
     set_bool(state, -2, "active", player.active);
 
-    if (refresh_live && api->player_state) {
+    if (refresh_live && api->player_state && player.slot >= 0 &&
+        player.slot < 64) {
         PlayerState live;
         char error[256]{};
         if (api->player_state(api->context, player.slot, &live, error,
-                              sizeof(error))) {
+                              sizeof(error)) &&
+            valid_player_state(live)) {
             apply_state(state, -1, live);
         } else {
             set_bool(state, -2, "valid", false);
@@ -139,6 +157,9 @@ int refresh(lua_State* state) {
                            sizeof(error))) {
         return fail(state, error);
     }
+    if (!valid_player_state(value)) {
+        return fail(state, "Source 2 returned invalid player state");
+    }
 
     if (lua_istable(state, 1)) {
         apply_state(state, 1, value);
@@ -156,7 +177,7 @@ int refresh(lua_State* state) {
 
 int get_by_slot(lua_State* state) {
     const auto* api = services(state);
-    const int slot = static_cast<int>(luaL_checkinteger(state, 1));
+    const int slot = luacs::lua_checked::checked_slot(state, 1);
     PlayerInfo player;
     if (!api || !api->player_get ||
         !api->player_get(api->context, slot, &player)) {
@@ -184,7 +205,7 @@ int get(lua_State* state) {
     }
 
     if (lua_isinteger(state, 1)) {
-        const auto needle = lua_tointeger(state, 1);
+        const lua_Integer needle = lua_tointeger(state, 1);
         PlayerInfo by_slot;
         if (needle >= 0 && needle < 64 && api->player_get &&
             api->player_get(api->context, static_cast<int>(needle),
@@ -193,13 +214,16 @@ int get(lua_State* state) {
             return 1;
         }
 
-        for (std::size_t index = 0; index < api->player_count(api->context);
-             ++index) {
-            PlayerInfo player;
-            if (api->player_at(api->context, index, &player) &&
-                player.steam64 == static_cast<std::uint64_t>(needle)) {
-                push_player(state, api, player);
-                return 1;
+        if (needle >= 0) {
+            const auto steam_needle = static_cast<std::uint64_t>(needle);
+            const std::size_t count = api->player_count(api->context);
+            for (std::size_t index = 0; index < count; ++index) {
+                PlayerInfo player;
+                if (api->player_at(api->context, index, &player) &&
+                    player.steam64 == steam_needle) {
+                    push_player(state, api, player);
+                    return 1;
+                }
             }
         }
         lua_pushnil(state);
@@ -207,8 +231,8 @@ int get(lua_State* state) {
     }
 
     const std::string needle = lower(luaL_checkstring(state, 1));
-    for (std::size_t index = 0; index < api->player_count(api->context);
-         ++index) {
+    const std::size_t count = api->player_count(api->context);
+    for (std::size_t index = 0; index < count; ++index) {
         PlayerInfo player;
         if (!api->player_at(api->context, index, &player)) continue;
         if (lower(player.name ? player.name : "") == needle ||
@@ -223,14 +247,21 @@ int get(lua_State* state) {
 
 int all(lua_State* state) {
     const auto* api = services(state);
-    const std::size_t count =
-        api && api->player_count ? api->player_count(api->context) : 0;
-    lua_createtable(state, static_cast<int>(count), 0);
+    if (!api || !api->player_count || !api->player_at) {
+        lua_newtable(state);
+        return 1;
+    }
+    const std::size_t count = api->player_count(api->context);
+    const int capacity = luacs::lua_checked::checked_table_capacity(
+        state, count, "player list is too large for a Lua table");
+    lua_createtable(state, capacity, 0);
+    lua_Integer output = 1;
     for (std::size_t index = 0; index < count; ++index) {
         PlayerInfo player;
         if (!api->player_at(api->context, index, &player)) continue;
+        if (player.slot < 0 || player.slot >= 64) continue;
         push_player(state, api, player);
-        lua_seti(state, -2, static_cast<lua_Integer>(index + 1));
+        lua_seti(state, -2, output++);
     }
     return 1;
 }
@@ -239,7 +270,9 @@ int set_integer_field(lua_State* state, PlayerIntField field,
                       const char* table_field) {
     const auto* api = services(state);
     const int slot = slot_from(state, 1);
-    const int value = static_cast<int>(luaL_checkinteger(state, 2));
+    const int value = luacs::lua_checked::checked_int(
+        state, 2, std::numeric_limits<int>::min(),
+        std::numeric_limits<int>::max(), "value must fit a 32-bit integer");
     char error[256]{};
     if (!api || !api->player_set_int ||
         !api->player_set_int(api->context, slot, field, value, error,
@@ -257,7 +290,7 @@ int set_boolean_field(lua_State* state, PlayerBoolField field,
                       const char* table_field) {
     const auto* api = services(state);
     const int slot = slot_from(state, 1);
-    const bool value = lua_toboolean(state, 2) != 0;
+    const bool value = luacs::lua_checked::strict_boolean(state, 2);
     char error[256]{};
     if (!api || !api->player_set_bool ||
         !api->player_set_bool(api->context, slot, field, value, error,
@@ -274,23 +307,18 @@ int set_boolean_field(lua_State* state, PlayerBoolField field,
 int set_health(lua_State* state) {
     return set_integer_field(state, PlayerIntField::Health, "health");
 }
-
 int set_armor(lua_State* state) {
     return set_integer_field(state, PlayerIntField::Armor, "armor");
 }
-
 int set_money(lua_State* state) {
     return set_integer_field(state, PlayerIntField::Money, "money");
 }
-
 int set_helmet(lua_State* state) {
     return set_boolean_field(state, PlayerBoolField::Helmet, "helmet");
 }
-
 int set_defuser(lua_State* state) {
     return set_boolean_field(state, PlayerBoolField::Defuser, "defuser");
 }
-
 int set_prevent_weapon_pickup(lua_State* state) {
     return set_boolean_field(state, PlayerBoolField::PreventWeaponPickup,
                              nullptr);
@@ -299,31 +327,34 @@ int set_prevent_weapon_pickup(lua_State* state) {
 bool read_vector(lua_State* state, int index, Vector3& output) {
     if (lua_isnoneornil(state, index)) return false;
     luaL_checktype(state, index, LUA_TTABLE);
-    lua_getfield(state, index, "x");
+    const int table = lua_absindex(state, index);
+    lua_getfield(state, table, "x");
     output.x = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
-    lua_getfield(state, index, "y");
+    lua_getfield(state, table, "y");
     output.y = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
-    lua_getfield(state, index, "z");
+    lua_getfield(state, table, "z");
     output.z = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
+    if (!finite_vector(output)) {
+        luaL_argerror(state, index, "teleport vector components must be finite");
+    }
     return true;
 }
 
 int teleport(lua_State* state) {
     const auto* api = services(state);
     const int slot = slot_from(state, 1);
-    Vector3 position;
-    Vector3 angles;
-    Vector3 velocity;
+    Vector3 position{};
+    Vector3 angles{};
+    Vector3 velocity{};
     const bool has_position = read_vector(state, 2, position);
     const bool has_angles = read_vector(state, 3, angles);
     const bool has_velocity = read_vector(state, 4, velocity);
     if (!has_position && !has_angles && !has_velocity) {
-        return luaL_error(
-            state,
-            "teleport requires position, angles, or velocity");
+        return luaL_error(state,
+                          "teleport requires position, angles, or velocity");
     }
 
     char error[256]{};
@@ -356,7 +387,8 @@ int teleport(lua_State* state) {
 int kill(lua_State* state) {
     const auto* api = services(state);
     const int slot = slot_from(state, 1);
-    const bool explode = lua_toboolean(state, 2) != 0;
+    const bool explode =
+        luacs::lua_checked::optional_boolean(state, 2, false);
     char error[256]{};
     if (!api || !api->player_kill ||
         !api->player_kill(api->context, slot, explode, error,
@@ -386,14 +418,12 @@ int respawn(lua_State* state) {
 int team_action(lua_State* state, bool switch_team) {
     const auto* api = services(state);
     const int slot = slot_from(state, 1);
-    const int team = static_cast<int>(luaL_checkinteger(state, 2));
-    if (team < 0 || team > 3) {
-        return luaL_error(state, "team must be 0, 1, 2, or 3");
-    }
+    const int team = luacs::lua_checked::checked_int(
+        state, 2, 0, 3, "team must be 0, 1, 2, or 3");
     char error[256]{};
     if (!api || !api->player_change_team ||
-        !api->player_change_team(api->context, slot, team, switch_team,
-                                 error, sizeof(error))) {
+        !api->player_change_team(api->context, slot, team, switch_team, error,
+                                 sizeof(error))) {
         return fail(state, error[0] ? error : "team change failed");
     }
     if (lua_istable(state, 1)) set_int(state, 1, "team", team);
@@ -409,10 +439,11 @@ int is_valid(lua_State* state) {
     const int slot = slot_from(state, 1);
     PlayerState value;
     char error[64]{};
-    lua_pushboolean(state, api && api->player_state &&
-                               api->player_state(api->context, slot, &value,
-                                                 error, sizeof(error)) &&
-                               value.valid);
+    lua_pushboolean(state,
+                    api && api->player_state &&
+                        api->player_state(api->context, slot, &value, error,
+                                          sizeof(error)) &&
+                        valid_player_state(value));
     return 1;
 }
 
@@ -421,19 +452,23 @@ int is_alive(lua_State* state) {
     const int slot = slot_from(state, 1);
     PlayerState value;
     char error[64]{};
-    lua_pushboolean(state, api && api->player_state &&
-                               api->player_state(api->context, slot, &value,
-                                                 error, sizeof(error)) &&
-                               value.alive);
+    lua_pushboolean(state,
+                    api && api->player_state &&
+                        api->player_state(api->context, slot, &value, error,
+                                          sizeof(error)) &&
+                        valid_player_state(value) && value.alive);
     return 1;
 }
 
 int player_tostring(lua_State* state) {
     lua_getfield(state, 1, "name");
     const char* name = lua_tostring(state, -1);
+    const std::string stable_name = name ? name : "";
+    lua_pop(state, 1);
     lua_getfield(state, 1, "slot");
-    const int slot = static_cast<int>(lua_tointeger(state, -1));
-    lua_pushfstring(state, "Player(%d, %s)", slot, name ? name : "");
+    const lua_Integer slot = luaL_checkinteger(state, -1);
+    lua_pop(state, 1);
+    lua_pushfstring(state, "Player(%I, %s)", slot, stable_name.c_str());
     return 1;
 }
 
