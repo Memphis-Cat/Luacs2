@@ -40,10 +40,18 @@ function Assert-NotContains {
 $cmake = Read-Required "CMakeLists.txt"
 Assert-Contains $cmake @(
     'add_compile_options(/utf-8 /MP /WX)',
+    'set_source_files_properties(${LUA_SOURCES} PROPERTIES LANGUAGE CXX)',
     'add_luacs_module(traces src/modules/traces/traces_verified.cpp)',
     'add_luacs_module(grenades src/modules/grenades/grenades_verified.cpp)',
     'game_api_advanced_runtime_guards.cpp'
 ) "CMake warning policy and verified layers"
+
+$generatedInjection = Read-Required "tools\inject-generated-game-api.cmake"
+Assert-Contains $generatedInjection @(
+    'sourcehook_impl_chookmaninfo.cpp',
+    '${sourcehook_hookman_source}',
+    'target_sources(luacs2 PRIVATE'
+) "complete SourceHook generated-source injection"
 
 $smg = Read-Required "src\common\smg.cpp"
 Assert-Contains $smg @(
@@ -160,8 +168,9 @@ Assert-Contains $runtimeEvents @(
     'Could not snapshot event callbacks',
     'Could not snapshot command callbacks',
     'Could not enumerate plugin packages',
-    'Server-command callback threw'
-) "runtime event/admin hardening"
+    'Server-command callback threw',
+    'disable_vm(vm, context);'
+) "runtime event/admin/quarantine hardening"
 
 $pluginHeader = Read-Required "src\plugin\plugin.h"
 Assert-Contains $pluginHeader @(
@@ -186,9 +195,13 @@ Assert-NotContains $plugin @(
 $serverModule = Read-Required "src\plugin\server_module.cpp"
 Assert-Contains $serverModule @(
     'GetModuleHandleExW(',
-    'filename != "server.dll"',
+    'GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS',
+    'GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT',
     'GetModuleFileNameW(',
-    'g_server_module_path'
+    '_wcsicmp(resolved_path.filename().c_str(), L"server.dll")',
+    'L"\\addons\\metamod\\"',
+    'g_game_server_module = module',
+    'g_game_server_module_path = resolved_path'
 ) "server module binding hardening"
 
 $world = Read-Required "src\plugin\game_api_world_build.cpp"
@@ -212,12 +225,16 @@ Assert-Contains $signatureGenerator @(
 
 $pluginGenerator = Read-Required "tools\generate-server-module-plugin.ps1"
 Assert-Contains $pluginGenerator @(
+    'Assert-ExactlyOnce $text $initializationMarker "game API initialization"',
     'release_lua_dependency();',
     'path_text(LuaCSGameServerModulePath())',
     'Could not reset the current-session native error log',
     'command_name == "say" || command_name == "say_team"',
     'player_slot >= 0 && player_slot < 64'
 ) "generated plugin hardening"
+Assert-NotContains $pluginGenerator @(
+    'game_api_.initialize(root, LuaCSGameServerModulePath(), game_api_error)'
+) "generated plugin nonexistent overload regression"
 
 $build = Read-Required "build.bat"
 Assert-Contains $build @(
@@ -228,8 +245,7 @@ Assert-Contains $build @(
     'instead of %DEP_COMMIT%'
 ) "deterministic build/stamp hardening"
 
-$generatedGameApi =
-    Join-Path $root "build\generated\plugin\game_api.cpp"
+$generatedGameApi = Join-Path $root "build\generated\plugin\game_api.cpp"
 if (Test-Path -LiteralPath $generatedGameApi -PathType Leaf) {
     $generated = [System.IO.File]::ReadAllText($generatedGameApi)
     Assert-Contains $generated @(
@@ -247,6 +263,7 @@ Write-Host (
     "LuaCS patch hardening tests passed: /WX policy, atomic SMG/key writes, " +
     "compiler preflight diagnostics, checked Lua conversions, exact uint64 " +
     "event/sound values, overflow-safe teams, entity lifecycle/stack safety, " +
-    "runtime exception and filesystem boundaries, native DLL cleanup, bounded " +
-    "game-event copies, validated WorldServices outputs, deterministic build " +
-    "stamps, and guarded generated signature dereferences are represented in source.")
+    "runtime exception/quarantine and filesystem boundaries, native DLL " +
+    "cleanup, complete SourceHook selection, bounded game-event copies, " +
+    "validated WorldServices outputs, deterministic build stamps, and guarded " +
+    "generated signature dereferences are represented in source.")
