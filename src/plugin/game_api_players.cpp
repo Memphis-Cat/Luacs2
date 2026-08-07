@@ -416,26 +416,50 @@ bool LuaCSGameApiImpl::weapon_remove(int slot, int entity_index,
                                      std::string& error) const {
     void* weapon_services{};
     auto* weapons = inventory(slot, weapon_services, error);
-    if (!weapons) return false;
+    if (!weapons || !weapon_services) return false;
     CEntityInstance* weapon = entity_by_index(entity_index);
-    if (!weapon || !inventory_contains(weapons, weapon->GetRefEHandle())) {
+    if (!weapon) {
+        error = "the selected weapon entity is invalid";
+        return false;
+    }
+
+    const CEntityHandle weapon_handle = weapon->GetRefEHandle();
+    if (!inventory_contains(weapons, weapon_handle)) {
         error = "the selected weapon is not in this player's inventory";
         return false;
     }
+    if (delete_entity && !remove_entity) {
+        error = "UTIL_Remove signature is unavailable";
+        return false;
+    }
+
     CEntityInstance* player_pawn = pawn(slot, error);
     if (!player_pawn) return false;
     if (!remove_player_item) {
         error = "CBasePlayerPawn::RemovePlayerItem signature is unavailable";
         return false;
     }
+
     remove_player_item(player_pawn, weapon);
-    if (delete_entity) {
-        if (!remove_entity) {
-            error = "UTIL_Remove signature is unavailable";
+
+    if (inventory_contains(weapons, weapon_handle)) {
+        const auto drop = virtual_function<DropWeaponFn>(weapon_services,
+                                                         drop_weapon_index);
+        if (!drop) {
+            error = "weapon remained in m_hMyWeapons after RemovePlayerItem and "
+                    "CCSPlayer_WeaponServices::DropWeapon is unavailable";
             return false;
         }
-        remove_entity(weapon);
+        drop(weapon_services, weapon, nullptr, nullptr);
     }
+
+    if (inventory_contains(weapons, weapon_handle)) {
+        error = "CS2 did not detach the weapon from m_hMyWeapons; refusing to "
+                "destroy an entity that is still referenced by the inventory";
+        return false;
+    }
+
+    if (delete_entity) remove_entity(weapon);
     return true;
 }
 
