@@ -29,6 +29,7 @@ $headerMarker = $headerMarker.TrimEnd("`r", "`n")
 $headerReplacement = @'
 #include "plugin.h"
 #include "server_module.h"
+#include <cctype>
 '@
 $headerReplacement = $headerReplacement.Replace('\"', '"')
 $headerReplacement = $headerReplacement.TrimEnd("`r", "`n")
@@ -103,9 +104,7 @@ void LuaCSPlugin::Hook_ClientCommand(CPlayerSlot slot,
         character = static_cast<char>(
             std::tolower(static_cast<unsigned char>(character)));
     }
-    if (command_name == "say" || command_name == "say_team") {
-        return;
-    }
+    if (command_name == "say" || command_name == "say_team") return;
     runtime_.client_command(slot.Get(), raw);
 }
 '@
@@ -129,24 +128,20 @@ $chatEventMarker = $chatEventMarker.TrimEnd("`r", "`n")
 $chatEventReplacement = @'
     if (copy) {
         const char* event_name = copy->GetName();
-        if (event_name && std::string_view(event_name) == "player_chat") {
-            const std::uint64_t token =
-                game_api_.begin_event(copy, true, dont_broadcast);
-            int player_slot = -1;
-            std::string chat_text;
-            if (game_api_.event_player_slot(token, "userid", player_slot) &&
-                game_api_.event_string(token, "text", "", chat_text) &&
-                player_slot >= 0 && player_slot < 64 && !chat_text.empty() &&
-                (chat_text.front() == '!' || chat_text.front() == '/')) {
+        if (!event_name) event_name = "";
+        if (std::string_view(event_name) == "player_chat") {
+            const char* chat_text = copy->GetString("text", "");
+            const int player_slot = copy->GetPlayerSlot("userid").Get();
+            if (chat_text && (chat_text[0] == '!' || chat_text[0] == '/') &&
+                player_slot >= 0 && player_slot < 64) {
                 runtime_.client_command(player_slot, chat_text);
             }
-            game_api_.end_event(token);
         }
         const std::uint64_t token =
             game_api_.begin_event(copy, true, dont_broadcast);
-        runtime_.dispatch_game_event(token, event_name ? event_name : "",
-                                     copy->GetID(), copy->IsReliable(),
-                                     copy->IsLocal(), true, dont_broadcast);
+        runtime_.dispatch_game_event(token, event_name, copy->GetID(),
+                                     copy->IsReliable(), copy->IsLocal(), true,
+                                     dont_broadcast);
         game_api_.end_event(token);
         game_api_.free_event(copy);
     }
