@@ -1,11 +1,14 @@
+#include "luacs/lua_checked.h"
 #include "luacs/module_api.h"
 
 extern "C" {
 #include "lauxlib.h"
 }
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -49,16 +52,31 @@ int get(lua_State* state) {
 
 int set(lua_State* state) {
     const char* name = luaL_checkstring(state, 1);
-    size_t length = 0;
+    std::size_t length = 0;
     const char* value = luaL_tolstring(state, 2, &length);
-    char error[512]{};
-    const bool result = g_services->cvar_set(g_services->context, name,
-                                              std::string(value, length).c_str(),
-                                              error, sizeof(error));
+    if (!value) return luaL_argerror(state, 2, "cvar value cannot be converted to text");
+    if (std::string_view(value, length).find('\0') != std::string_view::npos) {
+        lua_pop(state, 1);
+        return luaL_argerror(state, 2, "cvar value cannot contain NUL bytes");
+    }
+    const std::string stable_value(value, length);
     lua_pop(state, 1);
-    if (!result) return push_error(state, error);
+
+    char error[512]{};
+    if (!g_services->cvar_set(g_services->context, name, stable_value.c_str(),
+                              error, sizeof(error))) {
+        return push_error(state, error);
+    }
     lua_pushboolean(state, 1);
     return 1;
+}
+
+std::string lower_ascii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](char ch) {
+        if (ch >= 'A' && ch <= 'Z') return static_cast<char>(ch - 'A' + 'a');
+        return ch;
+    });
+    return value;
 }
 
 int get_bool(lua_State* state) {
@@ -67,18 +85,18 @@ int get_bool(lua_State* state) {
     std::string error;
     if (!read_value(name, value, error)) return push_error(state, error.c_str());
 
-    if (value == "1" || value == "true" || value == "TRUE" || value == "yes" ||
-        value == "on") {
+    value = lower_ascii(std::move(value));
+    if (value == "1" || value == "true" || value == "yes" || value == "on") {
         lua_pushboolean(state, 1);
         return 1;
     }
-    if (value == "0" || value == "false" || value == "FALSE" || value == "no" ||
-        value == "off") {
+    if (value == "0" || value == "false" || value == "no" || value == "off") {
         lua_pushboolean(state, 0);
         return 1;
     }
-    return push_error(state, ("cvar '" + std::string(name) +
-                              "' is not a boolean value").c_str());
+    const std::string message = "cvar '" + std::string(name) +
+                                "' is not a boolean value";
+    return push_error(state, message.c_str());
 }
 
 int get_int(lua_State* state) {
@@ -87,15 +105,16 @@ int get_int(lua_State* state) {
     std::string error;
     if (!read_value(name, value, error)) return push_error(state, error.c_str());
 
-    long long parsed = 0;
+    lua_Integer parsed = 0;
     const char* begin = value.data();
     const char* end = begin + value.size();
     const auto result = std::from_chars(begin, end, parsed);
-    if (result.ec != std::errc{} || result.ptr != end) {
-        return push_error(state, ("cvar '" + std::string(name) +
-                                  "' is not an integer value").c_str());
+    if (begin == end || result.ec != std::errc{} || result.ptr != end) {
+        const std::string message = "cvar '" + std::string(name) +
+                                    "' is not an integer value";
+        return push_error(state, message.c_str());
     }
-    lua_pushinteger(state, static_cast<lua_Integer>(parsed));
+    lua_pushinteger(state, parsed);
     return 1;
 }
 
@@ -105,12 +124,20 @@ int get_number(lua_State* state) {
     std::string error;
     if (!read_value(name, value, error)) return push_error(state, error.c_str());
 
+    if (value.empty()) {
+        const std::string message = "cvar '" + std::string(name) +
+                                    "' is not a numeric value";
+        return push_error(state, message.c_str());
+    }
+
     errno = 0;
     char* tail = nullptr;
     const double parsed = std::strtod(value.c_str(), &tail);
-    if (errno == ERANGE || tail != value.c_str() + value.size()) {
-        return push_error(state, ("cvar '" + std::string(name) +
-                                  "' is not a numeric value").c_str());
+    if (errno == ERANGE || tail == value.c_str() ||
+        tail != value.c_str() + value.size() || !std::isfinite(parsed)) {
+        const std::string message = "cvar '" + std::string(name) +
+                                    "' is not a finite numeric value";
+        return push_error(state, message.c_str());
     }
     lua_pushnumber(state, parsed);
     return 1;
@@ -127,7 +154,8 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
                                          const luacs::Services* services) {
     if (!services || services->abi_version != luacs::kModuleAbiVersion ||
         !services->cvar_exists || !services->cvar_get || !services->cvar_set) {
-        return luaL_error(state, "cvars.dll received an incompatible LuaCS service table");
+        return luaL_error(state,
+                          "cvars.dll received an incompatible LuaCS service table");
     }
     g_services = services;
 
