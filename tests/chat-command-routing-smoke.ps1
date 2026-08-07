@@ -21,6 +21,19 @@ function Assert-Contains {
     }
 }
 
+function Assert-NotContains {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string[]]$Tokens,
+        [Parameter(Mandatory = $true)][string]$Context
+    )
+    foreach ($token in $Tokens) {
+        if ($Text.Contains($token)) {
+            throw "$Context unexpectedly contains '$token'"
+        }
+    }
+}
+
 foreach ($requiredFile in @($generator, $pluginSource, $gunGiveSource)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "required chat-routing test file is missing: $requiredFile"
@@ -63,18 +76,28 @@ try {
 
     $gunGiveText = [System.IO.File]::ReadAllText($gunGiveSource)
     Assert-Contains $gunGiveText @(
+        'version = "1.2.0"',
         'events.on("player_chat", handle_chat)',
         'event:get_string("text", "")',
         'event:get_player("userid")',
         'requested = "weapon_" .. requested',
-        'weapons.give(player, classname)'
-    ) "gungive player_chat diagnostic"
+        'weapons.replace_slot(player, "auto", classname, true)',
+        'tostring(weapon.slot)',
+        'slot-replacing commands'
+    ) "gungive player_chat replacement example"
+
+    Assert-NotContains $gunGiveText @(
+        'weapons.give(player, classname)',
+        'primary_weapons',
+        'secondary_weapons'
+    ) "gungive replacement example"
 
     Write-Host (
         "LuaCS chat-command routing tests passed: Source 2 player_chat is the " +
         "authoritative chat path, ClientCommand skips say/say_team to prevent " +
         "duplicates, ! and / prefixes are bridged to commands.on, and the " +
-        "diagnostic gun plugin can also observe player_chat directly.")
+        "gun example uses weapons.replace_slot in auto mode without duplicate " +
+        "weapon-slot classification tables.")
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
