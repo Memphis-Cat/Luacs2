@@ -173,7 +173,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/plugin/game_api_advanced_complete_build.cpp"
     "${CMAKE_SOURCE_DIR}/src/plugin/game_api_advanced_final_build.cpp"
     "${CMAKE_SOURCE_DIR}/src/plugin/game_api_advanced_verified_build.cpp"
-    "${CMAKE_SOURCE_DIR}/src/plugin/game_api_advanced_schema_grenades_build.cpp")
+    "${CMAKE_SOURCE_DIR}/src/plugin/game_api_advanced_schema_grenades_build.cpp"
+    "${CMAKE_SOURCE_DIR}/src/plugin/game_api_advanced_runtime_guards.cpp")
 file(READ "${CMAKE_SOURCE_DIR}/src/plugin/game_api_advanced.cpp"
      LUACS_ADVANCED_SOURCE)
 string(REPLACE "\r\n" "\n" LUACS_ADVANCED_SOURCE
@@ -203,7 +204,8 @@ foreach(LUACS_ADVANCED_LAYER IN ITEMS
         game_api_advanced_complete_build.cpp
         game_api_advanced_final_build.cpp
         game_api_advanced_verified_build.cpp
-        game_api_advanced_schema_grenades_build.cpp)
+        game_api_advanced_schema_grenades_build.cpp
+        game_api_advanced_runtime_guards.cpp)
     configure_file(
         "${CMAKE_SOURCE_DIR}/src/plugin/${LUACS_ADVANCED_LAYER}"
         "${LUACS_ADVANCED_GENERATED_DIR}/${LUACS_ADVANCED_LAYER}"
@@ -216,7 +218,7 @@ add_library(luacs2 SHARED
     src/plugin/game_api.cpp
     src/plugin/game_api_players.cpp
     src/plugin/game_api_world_build.cpp
-    "${LUACS_ADVANCED_GENERATED_DIR}/game_api_advanced_schema_grenades_build.cpp"
+    "${LUACS_ADVANCED_GENERATED_DIR}/game_api_advanced_runtime_guards.cpp"
     src/plugin/game_api.h
     src/plugin/game_api_internal.h
     "${HL2SDK_CS2_ROOT}/public/tier0/memoverride.cpp"
