@@ -4,8 +4,8 @@ local weapons = require("cs2.weapons")
 plugin = {
     name = "Gun Give",
     author = "LuaCS",
-    version = "1.1.0",
-    description = "Chat-event weapon-give diagnostic plugin."
+    version = "1.2.0",
+    description = "Chat-event weapon replacement example using weapons.replace_slot."
 }
 
 local aliases = {
@@ -26,7 +26,7 @@ local function player_label(player)
         tostring(player.slot or "?") .. ")"
 end
 
-local function give_weapon(player, classname, command_name)
+local function replace_weapon(player, classname, command_name)
     if not player then
         print("[WARN] !" .. command_name ..
             " was received from player_chat but userid could not be resolved")
@@ -41,26 +41,29 @@ local function give_weapon(player, classname, command_name)
     end
 
     if not player.has_pawn then
-        print("[WARN] !" .. command_name .. " cannot give " .. classname ..
-            " to " .. player_label(player) .. ": no live pawn")
+        print("[WARN] !" .. command_name .. " cannot replace with " ..
+            classname .. " for " .. player_label(player) .. ": no live pawn")
         return
     end
 
     if player.alive == false then
-        print("[WARN] !" .. command_name .. " cannot give " .. classname ..
-            " to " .. player_label(player) .. ": player is dead")
+        print("[WARN] !" .. command_name .. " cannot replace with " ..
+            classname .. " for " .. player_label(player) .. ": player is dead")
         return
     end
 
-    local weapon, give_error = weapons.give(player, classname)
+    local weapon, replace_error =
+        weapons.replace_slot(player, "auto", classname, true)
     if not weapon then
-        print("[WARN] !" .. command_name .. " failed to give " .. classname ..
-            " to " .. player_label(player) .. ": " .. tostring(give_error))
+        print("[WARN] !" .. command_name .. " failed to replace with " ..
+            classname .. " for " .. player_label(player) .. ": " ..
+            tostring(replace_error))
         return
     end
 
-    print("[INFO] !" .. command_name .. " gave " .. classname .. " to " ..
-        player_label(player) .. " as entity " ..
+    print("[INFO] !" .. command_name .. " replaced " ..
+        tostring(weapon.slot) .. " with " .. tostring(weapon.classname) ..
+        " for " .. player_label(player) .. " as entity " ..
         tostring(weapon.entity_index or "?"))
 end
 
@@ -94,7 +97,7 @@ local function handle_chat(event)
 
     local classname = aliases[command_name]
     if classname then
-        give_weapon(player, classname, command_name)
+        replace_weapon(player, classname, command_name)
         return
     end
 
@@ -108,16 +111,17 @@ local function handle_chat(event)
     end
 
     local requested = string.lower(arguments)
-    if not requested:match("^weapon_") then
+    if not requested:match("^weapon_") and not requested:match("^item_") then
         requested = "weapon_" .. requested
     end
-    if not requested:match("^weapon_[%w_]+$") then
+    if not requested:match("^[%w_]+$") then
         print("[WARN] !gun rejected invalid classname: " .. requested)
         return
     end
-    give_weapon(player, requested, "gun")
+
+    replace_weapon(player, requested, "gun")
 end
 
 events.on("player_chat", handle_chat)
 
-print("[INFO] Gun Give registered player_chat commands: !ak, !ak47, !awp, !deagle, !m4, !m4a1, !m4a1s, !gun <ak47|weapon_classname>")
+print("[INFO] Gun Give v1.2.0 registered slot-replacing commands: !ak, !ak47, !awp, !deagle, !m4, !m4a1, !m4a1s, !gun <ak47|weapon_classname>")
