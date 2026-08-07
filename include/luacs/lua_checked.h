@@ -8,6 +8,7 @@ extern "C" {
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -73,7 +74,9 @@ inline bool optional_boolean(lua_State* state, int index, bool fallback) {
 
 inline double finite_number(lua_State* state, int index,
                             const char* message) {
-    if (!lua_isnumber(state, index)) value_error(state, index, message);
+    if (lua_type(state, index) != LUA_TNUMBER) {
+        value_error(state, index, message);
+    }
     const double value = lua_tonumber(state, index);
     if (!std::isfinite(value)) value_error(state, index, message);
     return value;
