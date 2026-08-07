@@ -4,6 +4,7 @@ $root = (Resolve-Path "$PSScriptRoot\..").Path
 $traceSource = Join-Path $root "src\modules\traces\traces.cpp"
 $traceVerified = Join-Path $root "src\modules\traces\traces_verified.cpp"
 $grenadeSource = Join-Path $root "src\modules\grenades\grenades.cpp"
+$grenadeVerified = Join-Path $root "src\modules\grenades\grenades_verified.cpp"
 $guardSource = Join-Path $root "src\plugin\game_api_advanced_runtime_guards.cpp"
 $schemaGrenadeSource = Join-Path $root "src\plugin\game_api_advanced_schema_grenades_build.cpp"
 $cmake = Join-Path $root "CMakeLists.txt"
@@ -41,6 +42,7 @@ foreach ($requiredFile in @(
     $traceSource,
     $traceVerified,
     $grenadeSource,
+    $grenadeVerified,
     $guardSource,
     $schemaGrenadeSource,
     $cmake,
@@ -69,10 +71,10 @@ Assert-Contains $traceText @(
     'add_function(state, api, "from_direction", &direction);',
     'add_function(state, api, "box", &hull);',
     'add_function(state, api, "did_hit", &result_did_hit);',
-    'add_function(state, api, "hit_world", &result_hit_world);',
-    'add_function(state, api, "hit_entity", &result_hit_entity);',
     'lua_setfield(state, -2, "total_distance");',
     'lua_setfield(state, -2, "remaining_distance");',
+    'lua_setfield(state, -2, "hit_entity");',
+    'lua_setfield(state, -2, "hit_world");',
     'lua_setfield(state, -2, "shape_name");',
     'add_mask(state, "MASK_ALL", 0xFFFFFFFFFFFFFFFFull);'
 ) "trace module"
@@ -85,6 +87,8 @@ $traceVerifiedText = [System.IO.File]::ReadAllText($traceVerified)
 Assert-Contains $traceVerifiedText @(
     'verified_trace_result_tostring',
     'std::snprintf(buffer, sizeof(buffer),',
+    'add_function(state, api, "did_hit_world", &result_hit_world);',
+    'add_function(state, api, "did_hit_entity", &result_hit_entity);',
     'lua_setfield(state, -2, "shapes");',
     'lua_setfield(state, -2, "objects");',
     'OBJECTS_ALL_GAME_ENTITIES',
@@ -124,6 +128,13 @@ Assert-Contains $grenadeText @(
     'lua_setfield(state, -2, "types");'
 ) "grenade module"
 
+$grenadeVerifiedText = [System.IO.File]::ReadAllText($grenadeVerified)
+Assert-Contains $grenadeVerifiedText @(
+    '#include <cstdio>',
+    '#include "grenades.cpp"',
+    'Do not rely on Lua headers to transitively'
+) "verified grenade module translation unit"
+
 $guardText = [System.IO.File]::ReadAllText($guardSource)
 Assert-Contains $guardText @(
     '#include "game_api_advanced_schema_grenades_build.cpp"',
@@ -161,7 +172,7 @@ Assert-Contains $cmakeText @(
     'game_api_advanced_runtime_guards.cpp',
     '"${LUACS_ADVANCED_GENERATED_DIR}/game_api_advanced_runtime_guards.cpp"',
     'add_luacs_module(traces src/modules/traces/traces_verified.cpp)',
-    'add_luacs_module(grenades src/modules/grenades/grenades.cpp)',
+    'add_luacs_module(grenades src/modules/grenades/grenades_verified.cpp)',
     'add_compile_options(/utf-8 /MP /WX)'
 ) "CMake trace/grenade selection"
 
@@ -180,8 +191,10 @@ Assert-Contains $traceDocsText @(
     '## Exact 64-bit masks and pointers',
     '## Trace results',
     '## Native validation boundary',
-    'MASK_ALL is represented exactly rather than wrapping to',
-    'result:hit_entity(entity_or_player)'
+    'MASK_ALL` is represented exactly rather than wrapping to',
+    'result:did_hit_world()',
+    'result:did_hit_entity(entity_or_player)',
+    '`hit_entity` and `hit_world` are boolean fields.'
 ) "trace documentation"
 
 $grenadeDocsText = [System.IO.File]::ReadAllText($grenadeDocs)
@@ -197,7 +210,8 @@ Assert-Contains $grenadeDocsText @(
 
 Write-Host (
     "LuaCS trace/grenade tests passed: exact unsigned 64-bit trace values, " +
-    "strict finite/filter inputs, all five Source 2 shapes, result helpers, " +
-    "schema-native transactional grenade creation, mutable grenade objects, " +
-    "type/filter/spawn helpers, final native output guards, and AdvancedWorld " +
-    "ABI v3 compatibility are all represented in source.")
+    "strict finite/filter inputs, all five Source 2 shapes, unambiguous result " +
+    "helpers, schema-native transactional grenade creation, mutable grenade " +
+    "objects, type/filter/spawn helpers, final native output guards, explicit " +
+    "module dependencies, and AdvancedWorld ABI v3 compatibility are all " +
+    "represented in source.")
