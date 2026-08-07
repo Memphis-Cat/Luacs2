@@ -150,7 +150,7 @@ local traces = require("cs2.traces")
 local grenades = require("cs2.grenades")
 ```
 
-The complete world API reference is in [`docs/world-apis.md`](docs/world-apis.md).
+The complete world API reference is in [`docs/world-apis.md`](docs/world-apis.md). The full typed/raw/reflection schema-property API is documented separately in [`docs/schema-properties.md`](docs/schema-properties.md).
 
 ## Weapon slots and replacement
 
@@ -220,6 +220,8 @@ The smoke test validates:
 - registration of the server-console `lua` command;
 - every documented plugin lifecycle command and metadata field;
 - SMG compilation, incremental caching, corruption recovery, and syntax-error preservation;
-- real Source 2 `Ray_t`, schema-property, trace, and schema-native grenade adapters.
+- safe weapon inventory replacement and slot classification;
+- verified schema-property path resolution, typed/raw access, reflection, collections, and property references;
+- real Source 2 `Ray_t`, trace, and schema-native grenade adapters.
 
 CI does not run a Windows CS2 dedicated server. Live engine behavior must still be tested on a current server and loaded map; unavailable signatures, fields, entities, recipients, or rules produce explicit errors.
