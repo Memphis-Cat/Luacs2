@@ -32,6 +32,11 @@ function Assert-NotContains {
     }
 }
 
+function Normalize-Whitespace {
+    param([Parameter(Mandatory = $true)][string]$Text)
+    return [regex]::Replace($Text, '\s+', ' ').Trim()
+}
+
 foreach ($requiredFile in @($nativeSource, $moduleSource, $abiHeader, $docs)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "required schema-property test file is missing: $requiredFile"
@@ -124,7 +129,7 @@ Assert-Contains $abiText @(
     'PropertyKind::Invalid'
 ) "advanced world ABI"
 
-$docsText = [System.IO.File]::ReadAllText($docs)
+$docsText = Normalize-Whitespace ([System.IO.File]::ReadAllText($docs))
 Assert-Contains $docsText @(
     '# LuaCS schema properties',
     '## Typed API',
