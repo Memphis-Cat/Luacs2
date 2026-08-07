@@ -30,6 +30,7 @@ $headerReplacement = @'
 #include "plugin.h"
 #include "server_module.h"
 #include <cctype>
+#include <cstring>
 '@
 $headerReplacement = $headerReplacement.Replace('\"', '"')
 $headerReplacement = $headerReplacement.TrimEnd("`r", "`n")
