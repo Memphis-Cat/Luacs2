@@ -56,6 +56,7 @@ Assert-Contains $generatedPluginText @(
     'std::filesystem::remove(g_native_error_log, reset_error);',
     'std::ofstream clear_error_log(g_native_error_log,',
     'std::ios::trunc',
+    'if (clear_error_log) clear_error_log.close();',
     'append_native_error(line);',
     'line.find("[ERROR]") == std::string_view::npos'
 ) "generated current-session native error logger"
@@ -75,12 +76,15 @@ $exampleText = [System.IO.File]::ReadAllText($exampleSource)
 Assert-Contains $exampleText @(
     'local timers = require("cs2.timers")',
     'local spawn_generation = {}',
+    'local configured_pawn_handle = {}',
     'local MAX_SPAWN_ATTEMPTS = 20',
     'events.on_post("player_spawn"',
     'timers.after(SPAWN_RETRY_DELAY',
     'player:refresh()',
     'player.has_pawn',
     'spawn_generation[player.slot] ~= generation',
+    'configured_pawn_handle[player.slot] == player.pawn_handle',
+    'configured_pawn_handle[player.slot] = player.pawn_handle',
     'warn_operation("spawn setup"'
 ) "deferred example spawn setup"
 Assert-Omits $exampleText @(
@@ -119,4 +123,5 @@ finally {
 Write-Host (
     "LuaCS logging and encoding tests passed: UTF-8 compiler output, no " +
     "mojibake, current-session-only native errors, deferred post-spawn pawn " +
-    "setup, bounded retries, and duplicate spawn suppression.")
+    "setup, bounded retries, generation deduplication, and one setup per pawn " +
+    "handle.")
