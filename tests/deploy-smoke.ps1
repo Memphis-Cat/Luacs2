@@ -103,16 +103,30 @@ if ($LASTEXITCODE -ne 0 -or $currentCommit -notmatch '^[0-9a-fA-F]{40}$') {
 }
 
 $stampBackup = [System.IO.File]::ReadAllBytes($packageStamp)
+$originalStampText = [System.IO.File]::ReadAllText($packageStamp)
 [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
 
 try {
+    # Deployment behavior is tested with an isolated current-stamp fixture.
+    # The real package may intentionally be from the immediately previous
+    # test-only commit. Its original stamp is restored byte-for-byte in finally.
+    $fixtureWrite = Invoke-ExternalPowerShell @(
+        "-File", $buildStampTool,
+        "-Mode", "Write",
+        "-StampPath", $packageStamp,
+        "-Commit", $currentCommit)
+    Assert-True ($fixtureWrite.ExitCode -eq 0) (
+        "could not create isolated current-stamp fixture:`n" +
+        $fixtureWrite.Output)
+
     $validateCurrent = Invoke-ExternalPowerShell @(
         "-File", $buildStampTool,
         "-Mode", "Validate",
         "-StampPath", $packageStamp,
         "-RepositoryRoot", $root)
     Assert-True ($validateCurrent.ExitCode -eq 0) (
-        "current package stamp was rejected:`n" + $validateCurrent.Output)
+        "isolated current-stamp fixture was rejected:`n" +
+        $validateCurrent.Output)
 
     $writtenStamp = Join-Path $tempRoot "written-build-commit.txt"
     $writeResult = Invoke-ExternalPowerShell @(
@@ -132,7 +146,7 @@ try {
     $successRoot = New-FakeServer -Name "success" -Gamedata Complete
     $success = Invoke-Deploy $successRoot
     Assert-True ($success.ExitCode -eq 0) (
-        "current package deployment failed:`n" + $success.Output)
+        "isolated current-stamp deployment failed:`n" + $success.Output)
     Assert-True ($success.Output -match [regex]::Escape($currentCommit)) (
         "successful deployment did not print the deployed commit")
     Assert-True ($success.Output -match "Imported current CounterStrikeSharp gamedata") (
@@ -203,11 +217,21 @@ try {
         "missing build stamp failure was not explicit")
 
     Write-Host (
-        "LuaCS deployment smoke tests passed: exact stamp writer, current " +
-        "deployment, packaged-gamedata fallback, incomplete gamedata, missing " +
-        "Metamod, stale package, malformed stamp, and missing stamp.")
+        "LuaCS deployment smoke tests passed: isolated current-stamp fixture, " +
+        "exact stamp writer, current deployment behavior, packaged-gamedata " +
+        "fallback, incomplete gamedata, missing Metamod, stale package, " +
+        "malformed stamp, missing stamp, and byte-for-byte stamp restoration.")
 }
 finally {
     [System.IO.File]::WriteAllBytes($packageStamp, $stampBackup)
+    $restoredBytes = [System.IO.File]::ReadAllBytes($packageStamp)
+    if (-not [System.Linq.Enumerable]::SequenceEqual(
+        [byte[]]$stampBackup,
+        [byte[]]$restoredBytes)) {
+        throw "deploy smoke test did not restore the original package stamp"
+    }
+    if ([System.IO.File]::ReadAllText($packageStamp) -cne $originalStampText) {
+        throw "deploy smoke test changed the original package stamp text"
+    }
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
