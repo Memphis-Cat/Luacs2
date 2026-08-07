@@ -17,6 +17,19 @@ function Assert-Contains {
     }
 }
 
+function Assert-NotContains {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string[]]$Tokens,
+        [Parameter(Mandatory = $true)][string]$Context
+    )
+    foreach ($token in $Tokens) {
+        if ($Text.Contains($token)) {
+            throw "$Context unexpectedly contains '$token'"
+        }
+    }
+}
+
 foreach ($requiredFile in @($playerSource, $weaponModule)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "required weapon-inventory test file is missing: $requiredFile"
@@ -36,38 +49,86 @@ if ($removeStart -lt 0 -or $nextFunction -le $removeStart) {
 }
 $removeBody = $playerText.Substring($removeStart, $nextFunction - $removeStart)
 
+Assert-Contains $playerText @(
+    'int inventory_remove_handle(CUtlVector<CEntityHandle>* inventory,',
+    'inventory->Remove(index);'
+) "inventory handle repair helper"
+
 Assert-Contains $removeBody @(
     'const CEntityHandle weapon_handle = weapon->GetRefEHandle();',
     'if (delete_entity && !remove_entity)',
     'remove_player_item(player_pawn, weapon);',
-    'if (inventory_contains(weapons, weapon_handle)) {',
-    'virtual_function<DropWeaponFn>(weapon_services,',
-    'drop(weapon_services, weapon, nullptr, nullptr);',
-    'CS2 did not detach the weapon from m_hMyWeapons; refusing to ',
+    'const int removed = inventory_remove_handle(weapons, weapon_handle);',
+    'could not remove the stale inventory handle',
+    'static_cast<std::uint32_t>(weapons_vector_offset)',
+    'auto& active = field<CEntityHandle>(weapon_services, active_weapon_offset);',
+    'active.Term();',
+    'auto& last = field<CEntityHandle>(weapon_services, last_weapon_offset);',
+    'last.Term();',
+    'weapon handle is still present in m_hMyWeapons after explicit ',
     'if (delete_entity) remove_entity(weapon);'
+) "safe weapon removal"
+
+Assert-NotContains $removeBody @(
+    'virtual_function<DropWeaponFn>',
+    'drop(weapon_services, weapon, nullptr, nullptr);'
 ) "safe weapon removal"
 
 $removePlayerItemIndex = $removeBody.IndexOf(
     'remove_player_item(player_pawn, weapon);',
     [System.StringComparison]::Ordinal)
-$dropIndex = $removeBody.IndexOf(
-    'drop(weapon_services, weapon, nullptr, nullptr);',
+$repairIndex = $removeBody.IndexOf(
+    'inventory_remove_handle(weapons, weapon_handle)',
     [System.StringComparison]::Ordinal)
-$refusalIndex = $removeBody.IndexOf(
-    'CS2 did not detach the weapon from m_hMyWeapons; refusing to ',
+$activeIndex = $removeBody.IndexOf(
+    'active.Term();',
+    [System.StringComparison]::Ordinal)
+$lastIndex = $removeBody.IndexOf(
+    'last.Term();',
     [System.StringComparison]::Ordinal)
 $destroyIndex = $removeBody.IndexOf(
     'if (delete_entity) remove_entity(weapon);',
     [System.StringComparison]::Ordinal)
-if ($removePlayerItemIndex -lt 0 -or $dropIndex -lt 0 -or
-    $refusalIndex -lt 0 -or $destroyIndex -lt 0 -or
-    $removePlayerItemIndex -ge $dropIndex -or
-    $dropIndex -ge $refusalIndex -or
-    $refusalIndex -ge $destroyIndex) {
+if ($removePlayerItemIndex -lt 0 -or $repairIndex -lt 0 -or
+    $activeIndex -lt 0 -or $lastIndex -lt 0 -or $destroyIndex -lt 0 -or
+    $removePlayerItemIndex -ge $repairIndex -or
+    $repairIndex -ge $activeIndex -or $activeIndex -ge $lastIndex -or
+    $lastIndex -ge $destroyIndex) {
     throw (
-        "weapon removal must try RemovePlayerItem, fall back to DropWeapon, " +
-        "verify detachment, and only then destroy the entity")
+        "weapon removal must run RemovePlayerItem, repair m_hMyWeapons, " +
+        "clear active/last references, and only then destroy the entity")
 }
+
+$countStart = $playerText.IndexOf(
+    "std::size_t LuaCSGameApiImpl::weapon_count(",
+    [System.StringComparison]::Ordinal)
+$atStart = $playerText.IndexOf(
+    "bool LuaCSGameApiImpl::weapon_at(",
+    $countStart,
+    [System.StringComparison]::Ordinal)
+$getStart = $playerText.IndexOf(
+    "bool LuaCSGameApiImpl::weapon_get(",
+    $atStart,
+    [System.StringComparison]::Ordinal)
+if ($countStart -lt 0 -or $atStart -le $countStart -or $getStart -le $atStart) {
+    throw "could not isolate weapon inventory enumeration functions"
+}
+$countBody = $playerText.Substring($countStart, $atStart - $countStart)
+$atBody = $playerText.Substring($atStart, $getStart - $atStart)
+
+Assert-Contains $countBody @(
+    'if (entity_by_handle((*weapons)[index])) continue;',
+    'weapons->Remove(index);',
+    'if (repaired) {',
+    'static_cast<std::uint32_t>(weapons_vector_offset)'
+) "weapon_count stale-handle repair"
+
+Assert-Contains $atBody @(
+    'while (index < static_cast<std::size_t>(weapons->Count())) {',
+    'CEntityInstance* weapon = entity_by_handle(handle);',
+    'weapons->Remove(static_cast<int>(index));',
+    'static_cast<std::uint32_t>(weapons_vector_offset)'
+) "weapon_at stale-handle repair"
 
 $moduleText = [System.IO.File]::ReadAllText($weaponModule)
 Assert-Contains $moduleText @(
@@ -86,7 +147,8 @@ Assert-Contains $moduleText @(
 ) "weapon.slot classification"
 
 Write-Host (
-    "LuaCS weapon inventory tests passed: removal never destroys an entity " +
-    "while m_hMyWeapons still references it, DropWeapon is a verified " +
-    "fallback, and weapon.slot exposes primary, secondary, knife, grenade, " +
-    "equipment, c4, melee, and other classifications without changing ABI.")
+    "LuaCS weapon inventory tests passed: removal repairs m_hMyWeapons " +
+    "directly instead of using an asynchronous DropWeapon fallback, clears " +
+    "active/last references before destruction, inventory enumeration prunes " +
+    "dead handles, and weapon.slot exposes primary, secondary, knife, " +
+    "grenade, equipment, c4, melee, and other without changing ABI.")
