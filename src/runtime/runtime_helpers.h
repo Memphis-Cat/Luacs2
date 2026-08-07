@@ -11,6 +11,8 @@ namespace luacs::detail {
 inline constexpr const char* kRuntimeRegistryKey = "LuaCS.Runtime";
 inline constexpr const char* kVmRegistryKey = "LuaCS.ScriptVm";
 inline constexpr const char* kValueMeta = "LuaCS.Value";
+inline constexpr const char* kDisabledRegistryKey = "LuaCS.Disabled";
+inline constexpr const char* kDisableReasonRegistryKey = "LuaCS.DisableReason";
 
 inline std::string trim(std::string_view input) {
     auto begin = input.begin();
@@ -33,6 +35,33 @@ inline void push_bool_field(lua_State* state, const char* key, bool value) {
 inline void push_integer_field(lua_State* state, const char* key, lua_Integer value) {
     lua_pushinteger(state, value);
     lua_setfield(state, -2, key);
+}
+
+inline bool vm_disabled(lua_State* state) {
+    if (!state) return true;
+    lua_getfield(state, LUA_REGISTRYINDEX, kDisabledRegistryKey);
+    const bool disabled = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    return disabled;
+}
+
+inline void disable_vm(lua_State* state, std::string_view reason) {
+    if (!state) return;
+    lua_pushboolean(state, 1);
+    lua_setfield(state, LUA_REGISTRYINDEX, kDisabledRegistryKey);
+    lua_pushlstring(state, reason.data(), reason.size());
+    lua_setfield(state, LUA_REGISTRYINDEX, kDisableReasonRegistryKey);
+}
+
+inline std::string vm_disable_reason(lua_State* state) {
+    if (!state) return {};
+    lua_getfield(state, LUA_REGISTRYINDEX, kDisableReasonRegistryKey);
+    std::size_t size{};
+    const char* text = lua_tolstring(state, -1, &size);
+    std::string result;
+    if (text && size != 0) result.assign(text, size);
+    lua_pop(state, 1);
+    return result;
 }
 
 inline std::string steam3_from_steam64(std::uint64_t steam64) {
