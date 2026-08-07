@@ -29,31 +29,36 @@ $headerReplacement = @'
 $headerReplacement = $headerReplacement.Replace('\"', '"')
 $headerReplacement = $headerReplacement.TrimEnd("`r", "`n")
 
+# Keep module binding independent from the exact contents of the subsequent
+# game_api_.initialize failure block. The declaration and initializer call are
+# each required exactly once, so source drift is still rejected explicitly.
 $serverModuleMarker = @'
     std::string game_api_error;
-    if (!game_api_.initialize(root, game_api_error)) {
 '@
-$serverModuleMarker = $serverModuleMarker.Replace('\"', '"')
 $serverModuleMarker = $serverModuleMarker.TrimEnd("`r", "`n")
 $serverModuleReplacement = @'
     std::string server_module_error;
     if (!LuaCSBindGameServerModule(g_server, server_module_error)) {
         const std::string message =
-            "Could not bind the Source 2 game module for LuaCS world APIs: " +
-            server_module_error;
+            "CS2 game server module binding failed: " + server_module_error;
         write_console("[ERROR] (lua) " + message);
         copy_error(error, maxlen, message);
         release_lua_dependency();
         return false;
     }
-    write_console("[INFO] (lua) Resolved Source 2 game module: " +
+    write_console("[INFO] (lua) Bound actual CS2 game server module: " +
                   path_text(LuaCSGameServerModulePath()));
 
     std::string game_api_error;
-    if (!game_api_.initialize(root, LuaCSGameServerModulePath(), game_api_error)) {
 '@
 $serverModuleReplacement = $serverModuleReplacement.Replace('\"', '"')
 $serverModuleReplacement = $serverModuleReplacement.TrimEnd("`r", "`n")
+
+$initializationMarker = @'
+    if (!game_api_.initialize(root, game_api_error)) {
+'@
+$initializationMarker = $initializationMarker.Replace('\"', '"')
+$initializationMarker = $initializationMarker.TrimEnd("`r", "`n")
 
 $errorLogMarker = @'
     g_native_error_log = root / "logs" / "luacs-errors.log";
@@ -146,11 +151,10 @@ $chatEventReplacement = @'
 $chatEventReplacement = $chatEventReplacement.Replace('\"', '"')
 $chatEventReplacement = $chatEventReplacement.TrimEnd("`r", "`n")
 
-function Replace-ExactlyOnce {
+function Assert-ExactlyOnce {
     param(
         [Parameter(Mandatory = $true)][string]$InputText,
         [Parameter(Mandatory = $true)][string]$Marker,
-        [Parameter(Mandatory = $true)][string]$Replacement,
         [Parameter(Mandatory = $true)][string]$Label
     )
 
@@ -162,6 +166,18 @@ function Replace-ExactlyOnce {
                            [StringComparison]::Ordinal) -ge 0) {
         throw "$Label marker appeared more than once in plugin.cpp"
     }
+}
+
+function Replace-ExactlyOnce {
+    param(
+        [Parameter(Mandatory = $true)][string]$InputText,
+        [Parameter(Mandatory = $true)][string]$Marker,
+        [Parameter(Mandatory = $true)][string]$Replacement,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    Assert-ExactlyOnce $InputText $Marker $Label
+    $first = $InputText.IndexOf($Marker, [StringComparison]::Ordinal)
     return $InputText.Substring(0, $first) + $Replacement +
            $InputText.Substring($first + $Marker.Length)
 }
@@ -169,6 +185,7 @@ function Replace-ExactlyOnce {
 $text = Replace-ExactlyOnce $text $headerMarker $headerReplacement "plugin header"
 $text = Replace-ExactlyOnce $text $errorLogMarker $errorLogReplacement "native error log"
 $text = Replace-ExactlyOnce $text $serverModuleMarker $serverModuleReplacement "server module binding"
+Assert-ExactlyOnce $text $initializationMarker "game API initialization"
 $text = Replace-ExactlyOnce $text $clientCommandMarker $clientCommandReplacement "ClientCommand chat guard"
 $text = Replace-ExactlyOnce $text $chatEventMarker $chatEventReplacement "player_chat dispatch"
 
