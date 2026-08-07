@@ -400,6 +400,7 @@ int remove_by_classname(lua_State* state) {
     int removed = 0;
     for (std::size_t reverse = total; reverse > 0; --reverse) {
         WeaponInfo weapon;
+        error[0] = '\0';
         if (!api->weapon_at(api->context, slot, reverse - 1, &weapon, error,
                             sizeof(error))) {
             return fail(state, error);
@@ -412,6 +413,109 @@ int remove_by_classname(lua_State* state) {
         ++removed;
     }
     lua_pushinteger(state, removed);
+    return 1;
+}
+
+int replace_slot(lua_State* state) {
+    const auto* api = services(state);
+    const int player_slot = check_slot(state, 1);
+    const std::string requested_slot = lower(luaL_checkstring(state, 2));
+    const char* class_name = luaL_checkstring(state, 3);
+    const bool equip = lua_isnoneornil(state, 4)
+                           ? true
+                           : lua_toboolean(state, 4) != 0;
+
+    if (requested_slot != "auto" &&
+        !one_of(requested_slot,
+                {"primary", "secondary", "knife", "grenade", "equipment",
+                 "c4", "melee"})) {
+        return luaL_argerror(
+            state, 2,
+            "expected auto, primary, secondary, knife, grenade, equipment, c4, or melee");
+    }
+
+    const std::string normalized_class = lower(class_name);
+    if (!valid_class_name(normalized_class)) {
+        return luaL_argerror(
+            state, 3,
+            "expected an exact CS2 classname such as weapon_ak47");
+    }
+
+    const std::string_view classified_slot =
+        classify_weapon_slot(normalized_class);
+    if (classified_slot == "other") {
+        return luaL_argerror(
+            state, 3,
+            "weapon classname is classified as other and cannot replace a slot");
+    }
+    if (requested_slot != "auto" && requested_slot != classified_slot) {
+        const std::string message =
+            "weapon classname belongs to slot '" +
+            std::string(classified_slot) + "', not '" + requested_slot + "'";
+        return luaL_argerror(state, 3, message.c_str());
+    }
+
+    if (!api || !api->weapon_count || !api->weapon_at ||
+        !api->weapon_remove || !api->weapon_give ||
+        (equip && !api->weapon_switch)) {
+        return fail(state, "weapon slot replacement service is unavailable");
+    }
+
+    char error[512]{};
+    const std::size_t total =
+        api->weapon_count(api->context, player_slot, error, sizeof(error));
+    if (error[0]) return fail(state, error);
+
+    for (std::size_t reverse = total; reverse > 0; --reverse) {
+        WeaponInfo existing;
+        error[0] = '\0';
+        if (!api->weapon_at(api->context, player_slot, reverse - 1, &existing,
+                            error, sizeof(error))) {
+            return fail(state, error);
+        }
+        if (classify_weapon_slot(lower(existing.classname)) != classified_slot) {
+            continue;
+        }
+        if (!api->weapon_remove(api->context, player_slot,
+                                existing.entity_index, true, error,
+                                sizeof(error))) {
+            return fail(state, error);
+        }
+    }
+
+    WeaponInfo replacement;
+    error[0] = '\0';
+    if (!api->weapon_give(api->context, player_slot, normalized_class.c_str(),
+                          &replacement, error, sizeof(error))) {
+        return fail(state, error);
+    }
+
+    if (equip) {
+        error[0] = '\0';
+        if (!api->weapon_switch(api->context, player_slot,
+                                replacement.entity_index, error,
+                                sizeof(error))) {
+            const std::string switch_error =
+                error[0] ? error : "CS2 rejected the weapon switch";
+            char rollback_error[512]{};
+            if (!api->weapon_remove(api->context, player_slot,
+                                    replacement.entity_index, true,
+                                    rollback_error, sizeof(rollback_error))) {
+                const std::string combined =
+                    "replacement weapon could not be equipped: " +
+                    switch_error + "; rollback failed: " +
+                    (rollback_error[0] ? rollback_error
+                                       : "unknown removal error");
+                return fail(state, combined.c_str());
+            }
+            const std::string message =
+                "replacement weapon could not be equipped: " + switch_error;
+            return fail(state, message.c_str());
+        }
+        replacement.active = true;
+    }
+
+    push_weapon(state, replacement);
     return 1;
 }
 
@@ -608,7 +712,7 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     }
     lua_pop(state, 1);
 
-    lua_createtable(state, 0, 20);
+    lua_createtable(state, 0, 21);
     add_function(state, api, "give", &give);
     add_function(state, api, "list", &list);
     add_function(state, api, "count", &count);
@@ -619,6 +723,7 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     add_function(state, api, "refresh", &refresh);
     add_function(state, api, "remove", &remove_weapon);
     add_function(state, api, "remove_by_classname", &remove_by_classname);
+    add_function(state, api, "replace_slot", &replace_slot);
     add_function(state, api, "remove_all", &remove_all);
     add_function(state, api, "drop", &drop);
     add_function(state, api, "drop_active", &drop_active);
