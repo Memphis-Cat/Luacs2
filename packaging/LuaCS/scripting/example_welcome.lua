@@ -20,6 +20,7 @@ local timers = require("cs2.timers")
 local SPAWN_RETRY_DELAY = 0.05
 local MAX_SPAWN_ATTEMPTS = 20
 local spawn_generation = {}
+local configured_pawn_handle = {}
 
 local function warn_operation(label, player, error_message)
     print("[WARN] " .. label .. " failed for slot " .. player.slot .. ": " ..
@@ -50,6 +51,8 @@ local function configure_spawn(player, generation, attempt)
         return
     end
 
+    if configured_pawn_handle[player.slot] == player.pawn_handle then return end
+
     apply_player_change("set_health", player, function()
         return player:set_health(100)
     end)
@@ -77,6 +80,7 @@ local function configure_spawn(player, generation, attempt)
         warn_operation("set_reserve1", player, reserve_error)
     end
 
+    configured_pawn_handle[player.slot] = player.pawn_handle
     hud.chat(player, "LuaCS live player and inventory API is active.")
 end
 
@@ -88,8 +92,8 @@ end)
 
 -- Real CS2 game event, post-fire. CS2 can emit more than one early spawn event
 -- while a player is joining, and the pawn may not exist until a later frame.
--- A generation token keeps only the newest setup request for each slot, while
--- bounded timer retries wait for the live pawn without hiding a real failure.
+-- Generation and pawn-handle checks keep one setup per real pawn, while bounded
+-- timer retries wait for readiness without hiding a genuine failure.
 events.on_post("player_spawn", function(event)
     local player = event:get_player("userid")
     if not player then return end
