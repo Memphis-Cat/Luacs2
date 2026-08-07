@@ -87,6 +87,79 @@ if ($initializationOccurrences -ne 1) {
 }
 $text = $text.Replace($initializationMarker, $initializationReplacement)
 
+$clientCommandMarker = @'
+void LuaCSPlugin::Hook_ClientCommand(CPlayerSlot slot,
+                                     const CCommand& command) {
+    runtime_.client_command(slot.Get(), command.GetCommandString());
+}
+'@.Replace("`r`n", "`n")
+$clientCommandReplacement = @'
+void LuaCSPlugin::Hook_ClientCommand(CPlayerSlot slot,
+                                     const CCommand& command) {
+    const char* command_line = command.GetCommandString();
+    if (!command_line) return;
+
+    const std::string_view raw(command_line);
+    const auto separator = raw.find_first_of(" \t");
+    const std::string_view command_name = raw.substr(0, separator);
+
+    // Source 2 chat is routed from the player_chat game event below. Some CS2
+    // builds do not expose say/say_team through ClientCommand at all, while
+    // others may expose both paths. Never dispatch chat here so a command
+    // cannot run twice when both engine paths are present.
+    if (command_name == "say" || command_name == "say_team") return;
+
+    runtime_.client_command(slot.Get(), raw);
+}
+'@.Replace("`r`n", "`n")
+
+$clientCommandOccurrences = ([regex]::Matches(
+    $text,
+    [regex]::Escape($clientCommandMarker))).Count
+if ($clientCommandOccurrences -ne 1) {
+    throw (
+        "expected exactly one ClientCommand routing marker, found " +
+        $clientCommandOccurrences)
+}
+$text = $text.Replace($clientCommandMarker, $clientCommandReplacement)
+
+$chatEventMarker = @'
+        const std::uint64_t token =
+            game_api_.begin_event(copy, true, dont_broadcast);
+        runtime_.dispatch_game_event(token, copy->GetName(), copy->GetID(),
+'@.Replace("`r`n", "`n")
+$chatEventReplacement = @'
+        const std::uint64_t token =
+            game_api_.begin_event(copy, true, dont_broadcast);
+
+        const char* event_name = copy->GetName();
+        if (event_name && std::string_view(event_name) == "player_chat") {
+            const char* chat_text = copy->GetString("text", "");
+            if (chat_text && (chat_text[0] == '!' || chat_text[0] == '/')) {
+                const int player_slot = copy->GetPlayerSlot("userid").Get();
+                if (player_slot >= 0 && player_slot < 64) {
+                    runtime_.client_command(player_slot, chat_text);
+                } else {
+                    write_console(
+                        "[WARN] (lua) player_chat command had an invalid "
+                        "player slot: " + std::to_string(player_slot));
+                }
+            }
+        }
+
+        runtime_.dispatch_game_event(token, event_name, copy->GetID(),
+'@.Replace("`r`n", "`n")
+
+$chatEventOccurrences = ([regex]::Matches(
+    $text,
+    [regex]::Escape($chatEventMarker))).Count
+if ($chatEventOccurrences -ne 1) {
+    throw (
+        "expected exactly one post player_chat routing marker, found " +
+        $chatEventOccurrences)
+}
+$text = $text.Replace($chatEventMarker, $chatEventReplacement)
+
 foreach ($required in @(
     '#include "server_module.h"',
     'std::filesystem::remove(g_native_error_log, reset_error)',
@@ -96,7 +169,12 @@ foreach ($required in @(
     'CS2 game server module binding failed:',
     'Bound actual CS2 game server module:',
     'LuaCSGameServerModulePath().string()',
-    'game_api_.initialize(root, game_api_error)'
+    'game_api_.initialize(root, game_api_error)',
+    'if (command_name == "say" || command_name == "say_team") return;',
+    'std::string_view(event_name) == "player_chat"',
+    'copy->GetString("text", "")',
+    'copy->GetPlayerSlot("userid").Get()',
+    'runtime_.client_command(player_slot, chat_text)'
 )) {
     if (-not $text.Contains($required)) {
         throw "generated plugin source is missing '$required'"
@@ -119,6 +197,25 @@ if ($resetIndex -lt 0 -or $bindIndex -lt 0 -or $initializeIndex -lt 0 -or
         "before game API initialization")
 }
 
+$clientChatSkipIndex = $text.IndexOf(
+    'if (command_name == "say" || command_name == "say_team") return;',
+    [System.StringComparison]::Ordinal)
+$playerChatIndex = $text.IndexOf(
+    'std::string_view(event_name) == "player_chat"',
+    [System.StringComparison]::Ordinal)
+$chatDispatchIndex = $text.IndexOf(
+    'runtime_.client_command(player_slot, chat_text)',
+    [System.StringComparison]::Ordinal)
+$eventDispatchIndex = $text.IndexOf(
+    'runtime_.dispatch_game_event(token, event_name, copy->GetID()',
+    [System.StringComparison]::Ordinal)
+if ($clientChatSkipIndex -lt 0 -or $playerChatIndex -lt 0 -or
+    $chatDispatchIndex -lt 0 -or $eventDispatchIndex -lt 0 -or
+    $playerChatIndex -ge $chatDispatchIndex -or
+    $chatDispatchIndex -ge $eventDispatchIndex) {
+    throw "generated Source 2 chat command routing is incomplete or misordered"
+}
+
 $destinationDirectory = Split-Path -Parent $Destination
 [System.IO.Directory]::CreateDirectory($destinationDirectory) | Out-Null
 [System.IO.File]::WriteAllText(
@@ -127,5 +224,5 @@ $destinationDirectory = Split-Path -Parent $Destination
     [System.Text.UTF8Encoding]::new($false))
 
 Write-Host (
-    'Generated plugin source with current-session error logging and live ' +
-    'CS2 server module binding.')
+    'Generated plugin source with current-session error logging, live CS2 ' +
+    'server module binding, and player_chat command routing.')
