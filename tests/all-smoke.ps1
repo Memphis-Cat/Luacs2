@@ -5,6 +5,26 @@ $utf8 = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $global:OutputEncoding = $utf8
 
+function ConvertFrom-CodePoints {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int[]]$CodePoints
+    )
+
+    return -join ($CodePoints | ForEach-Object { [char]$_ })
+}
+
+$mojibakeSequences = @(
+    (ConvertFrom-CodePoints @(0x0393, 0x00F2)),
+    (ConvertFrom-CodePoints @(0x0393, 0x00F6)),
+    (ConvertFrom-CodePoints @(0x0393, 0x00C7)),
+    (ConvertFrom-CodePoints @(0x0393, 0x00F9)),
+    (ConvertFrom-CodePoints @(0x00CE, 0x201C)),
+    (ConvertFrom-CodePoints @(0x00C3)),
+    (ConvertFrom-CodePoints @(0x00E2)),
+    (ConvertFrom-CodePoints @(0xFFFD))
+)
+
 $root = (Resolve-Path "$PSScriptRoot\..").Path
 $utf8Runner = Join-Path $PSScriptRoot "invoke-utf8.ps1"
 $tests = @(
@@ -30,12 +50,13 @@ foreach ($test in $tests) {
         -File $utf8Runner -Script $path 2>&1 | Out-String)
     $exitCode = $LASTEXITCODE
 
-    foreach ($badSequence in @(
-        "Γò", "Γö", "ΓÇ", "Γù", "Ã", "â", [string][char]0xFFFD
-    )) {
+    foreach ($badSequence in $mojibakeSequences) {
         if ($output.Contains($badSequence)) {
+            $codePoints = -join ($badSequence.ToCharArray() | ForEach-Object {
+                "U+{0:X4} " -f [int]$_
+            })
             throw (
-                "$test produced mojibake sequence '$badSequence':`n" +
+                "$test produced mojibake code points $($codePoints.Trim()):`n" +
                 $output)
         }
     }
