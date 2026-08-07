@@ -103,6 +103,7 @@ if ($LASTEXITCODE -ne 0 -or $currentCommit -notmatch '^[0-9a-fA-F]{40}$') {
 }
 
 $stampBackup = [System.IO.File]::ReadAllBytes($packageStamp)
+$stampBackupBase64 = [Convert]::ToBase64String($stampBackup)
 $originalStampText = [System.IO.File]::ReadAllText($packageStamp)
 [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
 
@@ -225,9 +226,8 @@ try {
 finally {
     [System.IO.File]::WriteAllBytes($packageStamp, $stampBackup)
     $restoredBytes = [System.IO.File]::ReadAllBytes($packageStamp)
-    if (-not [System.Linq.Enumerable]::SequenceEqual(
-        [byte[]]$stampBackup,
-        [byte[]]$restoredBytes)) {
+    $restoredBase64 = [Convert]::ToBase64String($restoredBytes)
+    if ($restoredBase64 -cne $stampBackupBase64) {
         throw "deploy smoke test did not restore the original package stamp"
     }
     if ([System.IO.File]::ReadAllText($packageStamp) -cne $originalStampText) {
