@@ -1,9 +1,12 @@
+#include "luacs/lua_checked.h"
 #include "luacs/module_api.h"
 #include "luacs/world_module.h"
 
 extern "C" {
 #include "lauxlib.h"
 }
+
+#include <cmath>
 
 namespace {
 
@@ -33,6 +36,10 @@ bool read_state(lua_State* state, RoundState& output, char* error,
            api->round_state(api->context, &output, error, error_size);
 }
 
+bool valid_state(const RoundState& value) {
+    return value.valid && std::isfinite(value.restart_time);
+}
+
 void push_state(lua_State* state, const RoundState& value) {
     lua_createtable(state, 0, 7);
     lua_pushboolean(state, value.valid);
@@ -49,10 +56,25 @@ void push_state(lua_State* state, const RoundState& value) {
     lua_setfield(state, -2, "restart_time");
 }
 
+bool get_valid_state(lua_State* state, RoundState& value, char* error,
+                     std::size_t error_size) {
+    if (!read_state(state, value, error, error_size)) return false;
+    if (!valid_state(value)) {
+        if (error && error_size) {
+            std::snprintf(error, error_size, "%s",
+                          "Source 2 returned invalid round state");
+        }
+        return false;
+    }
+    return true;
+}
+
 int get_state(lua_State* state) {
     RoundState value;
     char error[256]{};
-    if (!read_state(state, value, error, sizeof(error))) return fail(state, error);
+    if (!get_valid_state(state, value, error, sizeof(error))) {
+        return fail(state, error);
+    }
     push_state(state, value);
     return 1;
 }
@@ -60,7 +82,9 @@ int get_state(lua_State* state) {
 int get_number(lua_State* state) {
     RoundState value;
     char error[256]{};
-    if (!read_state(state, value, error, sizeof(error))) return fail(state, error);
+    if (!get_valid_state(state, value, error, sizeof(error))) {
+        return fail(state, error);
+    }
     lua_pushinteger(state, value.number);
     return 1;
 }
@@ -68,14 +92,20 @@ int get_number(lua_State* state) {
 int is_frozen(lua_State* state) {
     RoundState value;
     char error[256]{};
-    if (!read_state(state, value, error, sizeof(error))) return fail(state, error);
+    if (!get_valid_state(state, value, error, sizeof(error))) {
+        return fail(state, error);
+    }
     lua_pushboolean(state, value.frozen);
     return 1;
 }
 
 int restart(lua_State* state) {
     const auto* api = world(state);
-    const float delay = static_cast<float>(luaL_optnumber(state, 1, 1.0));
+    const float delay = lua_isnoneornil(state, 1)
+                            ? 1.0f
+                            : luacs::lua_checked::finite_float(
+                                  state, 1,
+                                  "restart delay must be finite");
     if (delay < 0.0f || delay > 3600.0f) {
         return luaL_argerror(state, 1,
                              "restart delay must be between 0 and 3600 seconds");
@@ -83,7 +113,8 @@ int restart(lua_State* state) {
     char error[256]{};
     if (!api || !api->round_restart ||
         !api->round_restart(api->context, delay, error, sizeof(error))) {
-        return fail(state, error[0] ? error : "round restart service is unavailable");
+        return fail(state,
+                    error[0] ? error : "round restart service is unavailable");
     }
     lua_pushboolean(state, true);
     return 1;
@@ -91,11 +122,13 @@ int restart(lua_State* state) {
 
 int terminate(lua_State* state) {
     const auto* api = world(state);
-    const int reason = static_cast<int>(luaL_checkinteger(state, 1));
-    const float delay = static_cast<float>(luaL_optnumber(state, 2, 0.0));
-    if (reason < 0 || reason > 255) {
-        return luaL_argerror(state, 1, "round-end reason must fit in one byte");
-    }
+    const int reason = luacs::lua_checked::checked_int(
+        state, 1, 0, 255, "round-end reason must fit in one byte");
+    const float delay = lua_isnoneornil(state, 2)
+                            ? 0.0f
+                            : luacs::lua_checked::finite_float(
+                                  state, 2,
+                                  "termination delay must be finite");
     if (delay < 0.0f || delay > 3600.0f) {
         return luaL_argerror(state, 2,
                              "termination delay must be between 0 and 3600 seconds");
@@ -104,7 +137,8 @@ int terminate(lua_State* state) {
     if (!api || !api->round_terminate ||
         !api->round_terminate(api->context, delay, reason, error,
                               sizeof(error))) {
-        return fail(state, error[0] ? error : "round termination service is unavailable");
+        return fail(state, error[0] ? error
+                                    : "round termination service is unavailable");
     }
     lua_pushboolean(state, true);
     return 1;
@@ -115,7 +149,8 @@ int set_frozen(lua_State* state, bool frozen) {
     char error[256]{};
     if (!api || !api->round_set_frozen ||
         !api->round_set_frozen(api->context, frozen, error, sizeof(error))) {
-        return fail(state, error[0] ? error : "round freeze service is unavailable");
+        return fail(state,
+                    error[0] ? error : "round freeze service is unavailable");
     }
     lua_pushboolean(state, true);
     return 1;
