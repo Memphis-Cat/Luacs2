@@ -72,17 +72,22 @@ try {
     $advancedFinal = Join-Path $root "src\plugin\game_api_advanced_final_build.cpp"
     $advancedVerified = Join-Path $root "src\plugin\game_api_advanced_verified_build.cpp"
     $advancedSchemaGrenades = Join-Path $root "src\plugin\game_api_advanced_schema_grenades_build.cpp"
+    $advancedRuntimeGuards = Join-Path $root "src\plugin\game_api_advanced_runtime_guards.cpp"
     $generatedAdvanced = Join-Path $root "build\generated\advanced\game_api_advanced.cpp"
     $propertiesSource = Join-Path $root "src\modules\properties\properties.cpp"
     $tracesSource = Join-Path $root "src\modules\traces\traces.cpp"
     $tracesVerified = Join-Path $root "src\modules\traces\traces_verified.cpp"
     $grenadesSource = Join-Path $root "src\modules\grenades\grenades.cpp"
+    $grenadesVerified = Join-Path $root "src\modules\grenades\grenades_verified.cpp"
 
     Assert-SourceTokens $cmakeFile @(
         "LUACS_LEGACY_NATIVE_RAY", "using NativeRay = Ray_t;",
         "CMAKE_CONFIGURE_DEPENDS", "generated/advanced",
         "game_api_advanced_schema_grenades_build.cpp",
+        "game_api_advanced_runtime_guards.cpp",
         "add_luacs_module(traces src/modules/traces/traces_verified.cpp)",
+        "add_luacs_module(grenades src/modules/grenades/grenades_verified.cpp)",
+        '"${LUACS_ADVANCED_GENERATED_DIR}/game_api_advanced_runtime_guards.cpp"',
         "sourcehook_impl_chookmaninfo.cpp"
     )
     Assert-SourceTokens $generatedAdvanced @(
@@ -198,21 +203,41 @@ try {
         "services.grenade_detonate = &grenade_detonate_schema"
     )
     Assert-SourceOmits $advancedSchemaGrenades @('"Detonate"')
+    Assert-SourceTokens $advancedRuntimeGuards @(
+        '#include "game_api_advanced_schema_grenades_build.cpp"',
+        "validate_trace_output", "validate_grenade_output",
+        "services.trace = &trace_runtime_guard",
+        "services.grenade_get = &grenade_get_runtime_guard",
+        "services.grenade_at = &grenade_at_runtime_guard",
+        "services.grenade_spawn = &grenade_spawn_runtime_guard"
+    )
     Assert-SourceTokens $propertiesSource @(
         '"get_raw"', '"set_raw"', '"collection_count"',
         '"collection_resize"', '"children"'
     )
     Assert-SourceTokens $tracesSource @(
         '"sphere"', '"capsule"', '"mesh"', '"SHAPE_MESH"',
-        "SET_INT(contents64)", "SET_INT(shape_collision_function_mask)"
+        "push_u64_exact(state, result.contents64);",
+        "SET_INT(shape_collision_function_mask)",
+        '"direction"', '"segment"', '"box"'
+    )
+    Assert-SourceOmits $tracesSource @(
+        "SET_INT(contents64)",
+        "lua_pushnumber(state, static_cast<lua_Number>(value))"
     )
     Assert-SourceTokens $tracesVerified @(
         '#include "traces.cpp"', '"MAX_IGNORE_ENTITIES"',
-        '"MAX_MESH_VERTICES"', '"OBJECTS_ALL"'
+        '"MAX_MESH_VERTICES"', '"OBJECTS_ALL"',
+        '"did_hit_world"', '"did_hit_entity"',
+        "verified_trace_result_tostring"
     )
     Assert-SourceTokens $grenadesSource @(
         "thrower_entity_index", "bounce_count", "smoke_effect_tick",
-        "bounce_sound"
+        "bounce_sound", "apply_grenade", '"by_owner"', '"by_thrower"',
+        '"spawn_he"', '"spawn_smoke"', '"spawn_incendiary"'
+    )
+    Assert-SourceTokens $grenadesVerified @(
+        "#include <cstdio>", '#include "grenades.cpp"'
     )
 
     if (-not (Test-Path -LiteralPath $advancedGamedata -PathType Leaf)) {
@@ -280,7 +305,7 @@ try {
         throw "syntax error replaced the previous SMG"
     }
 
-    Write-Host "LuaCS package, live game-event manager capture, all nine required Source 2 hooks, Source 2 lua command registration, plugin metadata/lifecycle, real Ray_t resolver, schema-native grenades, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
+    Write-Host "LuaCS package, live game-event manager capture, all nine required Source 2 hooks, Source 2 lua command registration, plugin metadata/lifecycle, real Ray_t resolver, exact trace API, schema-native grenades, final native output guards, verified ABI v3 adapters, Lua modules, and compiler smoke tests passed."
 }
 finally {
     Remove-Item $output, $badOutput, $badSource, $key -Force -ErrorAction SilentlyContinue
