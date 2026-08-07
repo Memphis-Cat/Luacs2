@@ -158,9 +158,13 @@ try {
         "LuaCSBindGameServerModule(g_server, server_module_error)",
         "CS2 game server module binding failed:",
         "Bound actual CS2 game server module:",
-        "LuaCSGameServerModulePath().string()",
+        "path_text(LuaCSGameServerModulePath())",
         "game_api_.initialize(root, game_api_error)"
     ) "generated plugin"
+    Assert-Omits $generatedPluginText @(
+        "game_api_.initialize(root, LuaCSGameServerModulePath(), game_api_error)"
+    ) "generated plugin"
+
     $bindIndex = $generatedPluginText.IndexOf(
         "LuaCSBindGameServerModule(g_server, server_module_error)",
         [System.StringComparison]::Ordinal)
@@ -179,7 +183,7 @@ try {
         "GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS",
         "GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT",
         "GetModuleFileNameW",
-        'L"server.dll"',
+        '_wcsicmp(resolved_path.filename().c_str(), L"server.dll")',
         'L"\\addons\\metamod\\"',
         "proxy server.dll instead of CS2's game server module",
         "g_game_server_module = module",
@@ -241,7 +245,7 @@ try {
     Assert-Contains $pluginText @(
         'g_native_error_log = root / "logs" / "luacs-errors.log";',
         'line.find("[ERROR]") == std::string_view::npos',
-        'std::ofstream output(g_native_error_log, std::ios::app);',
+        'std::ofstream output(g_native_error_log,',
         'GetLocalTime(&now);',
         'append_native_error(line);'
     ) "native LuaCS error logger"
