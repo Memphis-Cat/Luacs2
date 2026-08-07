@@ -158,8 +158,12 @@ Assert-Contains $runtimeLua @(
     'could not retain module',
     'native module threw C++ exception',
     'push_u64_exact(state, player.steam64)',
-    'Vector x component must be finite'
-) "runtime Lua/module-loader hardening"
+    'Vector x component must be finite',
+    'if (vm_disabled(vm.state))',
+    'lua_settop(vm.state, function_index - 1);',
+    'disable_vm(vm.state',
+    'Plugin disabled after an uncaught Lua callback error'
+) "runtime Lua/module-loader/quarantine hardening"
 
 $runtimeEvents = Read-Required "src\runtime\runtime_events.cpp"
 Assert-Contains $runtimeEvents @(
@@ -168,9 +172,8 @@ Assert-Contains $runtimeEvents @(
     'Could not snapshot event callbacks',
     'Could not snapshot command callbacks',
     'Could not enumerate plugin packages',
-    'Server-command callback threw',
-    'disable_vm(vm, context);'
-) "runtime event/admin/quarantine hardening"
+    'Server-command callback threw'
+) "runtime event/admin hardening"
 
 $pluginHeader = Read-Required "src\plugin\plugin.h"
 Assert-Contains $pluginHeader @(
