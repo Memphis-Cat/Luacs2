@@ -39,6 +39,21 @@ function(luacs_inject_generated_sources)
             "LuaCS target is missing required SourceHook sourcehook_impl_chookmaninfo.cpp.")
     endif()
 
+    set(lua_c_api_linkage_header
+        "${CMAKE_SOURCE_DIR}/src/common/lua_c_api_linkage.h")
+    if(NOT EXISTS "${lua_c_api_linkage_header}")
+        message(FATAL_ERROR
+            "Lua C ABI linkage header is missing: ${lua_c_api_linkage_header}")
+    endif()
+    if(NOT TARGET lua55 OR NOT TARGET lua55_static)
+        message(FATAL_ERROR
+            "Lua runtime targets are unavailable for C ABI linkage hardening.")
+    endif()
+    target_sources(lua55 PRIVATE "${lua_c_api_linkage_header}")
+    target_sources(lua55_static PRIVATE "${lua_c_api_linkage_header}")
+    target_compile_options(lua55 PRIVATE "/FI${lua_c_api_linkage_header}")
+    target_compile_options(lua55_static PRIVATE "/FI${lua_c_api_linkage_header}")
+
     set(generated_game_api
         "${CMAKE_BINARY_DIR}/generated/plugin/game_api.cpp")
     set(generated_plugin
@@ -61,7 +76,7 @@ function(luacs_inject_generated_sources)
         "${generated_plugin}"
         "${server_module_source}")
     message(STATUS
-        "Using generated disk-backed scanner and live game server module binding; complete SourceHook implementation set verified")
+        "Using generated disk-backed scanner and live game server module binding; complete SourceHook implementation set verified; Lua C ABI preserved across C++ core build")
 endfunction()
 
 cmake_language(DEFER CALL luacs_inject_generated_sources)
