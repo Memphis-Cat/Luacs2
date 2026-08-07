@@ -1,3 +1,4 @@
+#include "luacs/lua_checked.h"
 #include "luacs/module_api.h"
 
 extern "C" {
@@ -8,6 +9,7 @@ extern "C" {
 #include <cctype>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -25,42 +27,44 @@ const Services* services(lua_State* state) {
 
 int check_slot(lua_State* state, int index) {
     if (lua_isinteger(state, index)) {
-        return static_cast<int>(lua_tointeger(state, index));
+        return luacs::lua_checked::checked_slot(state, index);
     }
     luaL_checktype(state, index, LUA_TTABLE);
-    lua_getfield(state, index, "slot");
-    if (!lua_isinteger(state, -1)) {
-        lua_pop(state, 1);
-        return luaL_argerror(
-            state, index,
-            "expected a player table containing an integer slot");
-    }
-    const int slot = static_cast<int>(lua_tointeger(state, -1));
+    const int table = lua_absindex(state, index);
+    lua_getfield(state, table, "slot");
+    const int slot = luacs::lua_checked::checked_slot(state, -1);
     lua_pop(state, 1);
     return slot;
 }
 
 int check_entity_index(lua_State* state, int index) {
     if (lua_isinteger(state, index)) {
-        return static_cast<int>(lua_tointeger(state, index));
+        return luacs::lua_checked::checked_entity_index(state, index);
     }
     luaL_checktype(state, index, LUA_TTABLE);
-    lua_getfield(state, index, "entity_index");
+    const int table = lua_absindex(state, index);
+    lua_getfield(state, table, "entity_index");
     if (!lua_isinteger(state, -1)) {
         lua_pop(state, 1);
         return luaL_argerror(
             state, index,
             "expected a weapon table containing an integer entity_index");
     }
-    const int entity_index = static_cast<int>(lua_tointeger(state, -1));
+    const lua_Integer raw = lua_tointeger(state, -1);
     lua_pop(state, 1);
-    return entity_index;
+    if (raw < 0 || raw > std::numeric_limits<int>::max()) {
+        return luaL_argerror(
+            state, index,
+            "weapon entity_index must be a non-negative 32-bit integer");
+    }
+    return static_cast<int>(raw);
 }
 
 int owner_slot(lua_State* state, int index) {
     luaL_checktype(state, index, LUA_TTABLE);
-    lua_getfield(state, index, "owner_slot");
-    const int slot = static_cast<int>(luaL_checkinteger(state, -1));
+    const int table = lua_absindex(state, index);
+    lua_getfield(state, table, "owner_slot");
+    const int slot = luacs::lua_checked::checked_slot(state, -1);
     lua_pop(state, 1);
     return slot;
 }
@@ -81,9 +85,23 @@ int success(lua_State* state, bool result, const char* error) {
 bool valid_class_name(std::string_view name) {
     if (name.empty() || name.size() >= luacs::kClassnameCapacity) return false;
     for (const unsigned char character : name) {
-        if (std::isspace(character) || std::iscntrl(character)) return false;
+        if (character == 0 || std::isspace(character) ||
+            std::iscntrl(character)) {
+            return false;
+        }
     }
     return true;
+}
+
+std::string checked_class_name(lua_State* state, int index) {
+    std::size_t size = 0;
+    const char* raw = luaL_checklstring(state, index, &size);
+    const std::string value(raw ? raw : "", size);
+    if (!valid_class_name(value)) {
+        luaL_argerror(state, index,
+                      "expected an exact CS2 classname such as weapon_ak47");
+    }
+    return value;
 }
 
 bool one_of(std::string_view value,
@@ -154,6 +172,12 @@ void set_boolean(lua_State* state, int table, const char* field, bool value) {
     lua_setfield(state, table, field);
 }
 
+bool valid_weapon_info(const WeaponInfo& weapon) {
+    return weapon.valid && weapon.entity_index >= 0 &&
+           weapon.owner_slot >= -1 && weapon.owner_slot < 64 &&
+           weapon.classname[0] != '\0' && valid_class_name(weapon.classname);
+}
+
 void apply_weapon(lua_State* state, int table, const WeaponInfo& weapon) {
     table = lua_absindex(state, table);
     set_boolean(state, table, "valid", weapon.valid);
@@ -181,27 +205,35 @@ void push_weapon(lua_State* state, const WeaponInfo& weapon) {
 
 bool get_weapon(const Services* api, int entity_index, WeaponInfo& output,
                 char* error, std::size_t error_size) {
-    return api && api->weapon_get &&
-           api->weapon_get(api->context, entity_index, &output, error,
-                           error_size);
+    if (!api || !api->weapon_get ||
+        !api->weapon_get(api->context, entity_index, &output, error,
+                         error_size)) {
+        return false;
+    }
+    if (!valid_weapon_info(output)) {
+        if (error && error_size) {
+            std::snprintf(error, error_size, "%s",
+                          "Source 2 returned invalid weapon state");
+        }
+        return false;
+    }
+    return true;
 }
 
 int give(lua_State* state) {
     const auto* api = services(state);
     const int slot = check_slot(state, 1);
-    const char* class_name = luaL_checkstring(state, 2);
-    if (!valid_class_name(class_name)) {
-        return luaL_argerror(
-            state, 2,
-            "expected an exact CS2 classname such as weapon_ak47");
-    }
+    const std::string class_name = checked_class_name(state, 2);
 
     WeaponInfo weapon;
     char error[512]{};
     if (!api || !api->weapon_give ||
-        !api->weapon_give(api->context, slot, class_name, &weapon, error,
-                          sizeof(error))) {
+        !api->weapon_give(api->context, slot, class_name.c_str(), &weapon,
+                          error, sizeof(error))) {
         return fail(state, error);
+    }
+    if (!valid_weapon_info(weapon)) {
+        return fail(state, "Source 2 returned invalid given weapon state");
     }
     push_weapon(state, weapon);
     return 1;
@@ -218,13 +250,18 @@ int list(lua_State* state) {
         api->weapon_count(api->context, slot, error, sizeof(error));
     if (error[0]) return fail(state, error);
 
-    lua_createtable(state, static_cast<int>(count), 0);
+    const int capacity = luacs::lua_checked::checked_table_capacity(
+        state, count, "weapon inventory is too large for a Lua table");
+    lua_createtable(state, capacity, 0);
     for (std::size_t index = 0; index < count; ++index) {
         WeaponInfo weapon;
         error[0] = '\0';
         if (!api->weapon_at(api->context, slot, index, &weapon, error,
                             sizeof(error))) {
             return fail(state, error);
+        }
+        if (!valid_weapon_info(weapon)) {
+            return fail(state, "Source 2 returned invalid weapon state");
         }
         push_weapon(state, weapon);
         lua_seti(state, -2, static_cast<lua_Integer>(index + 1));
@@ -287,9 +324,13 @@ int active(lua_State* state) {
     if (error[0]) return fail(state, error);
     for (std::size_t index = 0; index < total; ++index) {
         WeaponInfo weapon;
+        error[0] = '\0';
         if (!api->weapon_at(api->context, slot, index, &weapon, error,
                             sizeof(error))) {
             return fail(state, error);
+        }
+        if (!valid_weapon_info(weapon)) {
+            return fail(state, "Source 2 returned invalid weapon state");
         }
         if (weapon.active) {
             push_weapon(state, weapon);
@@ -309,10 +350,20 @@ std::string lower(std::string_view value) {
     return result;
 }
 
+std::string checked_search_text(lua_State* state, int index) {
+    std::size_t size = 0;
+    const char* raw = luaL_checklstring(state, index, &size);
+    std::string value(raw ? raw : "", size);
+    if (value.find('\0') != std::string::npos) {
+        luaL_argerror(state, index, "weapon classname cannot contain NUL bytes");
+    }
+    return lower(value);
+}
+
 int find(lua_State* state) {
     const auto* api = services(state);
     const int slot = check_slot(state, 1);
-    const std::string needle = lower(luaL_checkstring(state, 2));
+    const std::string needle = checked_search_text(state, 2);
     char error[512]{};
     if (!api || !api->weapon_count || !api->weapon_at) {
         return fail(state, "weapon inventory service is unavailable");
@@ -322,9 +373,13 @@ int find(lua_State* state) {
     if (error[0]) return fail(state, error);
     for (std::size_t index = 0; index < total; ++index) {
         WeaponInfo weapon;
+        error[0] = '\0';
         if (!api->weapon_at(api->context, slot, index, &weapon, error,
                             sizeof(error))) {
             return fail(state, error);
+        }
+        if (!valid_weapon_info(weapon)) {
+            return fail(state, "Source 2 returned invalid weapon state");
         }
         if (lower(weapon.classname) == needle) {
             push_weapon(state, weapon);
@@ -370,9 +425,8 @@ int remove_weapon(lua_State* state) {
     const auto* api = services(state);
     const int slot = check_slot(state, 1);
     const int entity_index = check_entity_index(state, 2);
-    const bool delete_entity = lua_isnoneornil(state, 3)
-                                   ? true
-                                   : lua_toboolean(state, 3) != 0;
+    const bool delete_entity =
+        luacs::lua_checked::optional_boolean(state, 3, true);
     char error[512]{};
     return success(state,
                    api && api->weapon_remove &&
@@ -384,10 +438,9 @@ int remove_weapon(lua_State* state) {
 int remove_by_classname(lua_State* state) {
     const auto* api = services(state);
     const int slot = check_slot(state, 1);
-    const std::string needle = lower(luaL_checkstring(state, 2));
-    const bool delete_entity = lua_isnoneornil(state, 3)
-                                   ? true
-                                   : lua_toboolean(state, 3) != 0;
+    const std::string needle = checked_search_text(state, 2);
+    const bool delete_entity =
+        luacs::lua_checked::optional_boolean(state, 3, true);
     char error[512]{};
     if (!api || !api->weapon_count || !api->weapon_at ||
         !api->weapon_remove) {
@@ -405,6 +458,9 @@ int remove_by_classname(lua_State* state) {
                             sizeof(error))) {
             return fail(state, error);
         }
+        if (!valid_weapon_info(weapon)) {
+            return fail(state, "Source 2 returned invalid weapon state");
+        }
         if (lower(weapon.classname) != needle) continue;
         if (!api->weapon_remove(api->context, slot, weapon.entity_index,
                                 delete_entity, error, sizeof(error))) {
@@ -420,10 +476,8 @@ int replace_slot(lua_State* state) {
     const auto* api = services(state);
     const int player_slot = check_slot(state, 1);
     const std::string requested_slot = lower(luaL_checkstring(state, 2));
-    const char* class_name = luaL_checkstring(state, 3);
-    const bool equip = lua_isnoneornil(state, 4)
-                           ? true
-                           : lua_toboolean(state, 4) != 0;
+    const std::string class_name = checked_class_name(state, 3);
+    const bool equip = luacs::lua_checked::optional_boolean(state, 4, true);
 
     if (requested_slot != "auto" &&
         !one_of(requested_slot,
@@ -435,12 +489,6 @@ int replace_slot(lua_State* state) {
     }
 
     const std::string normalized_class = lower(class_name);
-    if (!valid_class_name(normalized_class)) {
-        return luaL_argerror(
-            state, 3,
-            "expected an exact CS2 classname such as weapon_ak47");
-    }
-
     const std::string_view classified_slot =
         classify_weapon_slot(normalized_class);
     if (classified_slot == "other") {
@@ -473,6 +521,9 @@ int replace_slot(lua_State* state) {
                             error, sizeof(error))) {
             return fail(state, error);
         }
+        if (!valid_weapon_info(existing)) {
+            return fail(state, "Source 2 returned invalid weapon state");
+        }
         if (classify_weapon_slot(lower(existing.classname)) != classified_slot) {
             continue;
         }
@@ -488,6 +539,12 @@ int replace_slot(lua_State* state) {
     if (!api->weapon_give(api->context, player_slot, normalized_class.c_str(),
                           &replacement, error, sizeof(error))) {
         return fail(state, error);
+    }
+    if (!valid_weapon_info(replacement)) {
+        char rollback_error[512]{};
+        api->weapon_remove(api->context, player_slot, replacement.entity_index,
+                           true, rollback_error, sizeof(rollback_error));
+        return fail(state, "Source 2 returned invalid replacement weapon state");
     }
 
     if (equip) {
@@ -546,8 +603,9 @@ int switch_to(lua_State* state) {
 int set_clip(lua_State* state, int clip_index, const char* field) {
     const auto* api = services(state);
     const int entity_index = check_entity_index(state, 1);
-    const int value = static_cast<int>(luaL_checkinteger(state, 2));
-    if (value < -1) return luaL_argerror(state, 2, "clip must be -1 or greater");
+    const int value = luacs::lua_checked::checked_int(
+        state, 2, -1, std::numeric_limits<int>::max(),
+        "clip must be -1 or a non-negative 32-bit integer");
     char error[512]{};
     if (!api || !api->weapon_set_clip ||
         !api->weapon_set_clip(api->context, entity_index, clip_index, value,
@@ -565,8 +623,9 @@ int set_clip2(lua_State* state) { return set_clip(state, 1, "clip2"); }
 int set_reserve(lua_State* state, int reserve_index, const char* field) {
     const auto* api = services(state);
     const int entity_index = check_entity_index(state, 1);
-    const int value = static_cast<int>(luaL_checkinteger(state, 2));
-    if (value < 0) return luaL_argerror(state, 2, "reserve ammo cannot be negative");
+    const int value = luacs::lua_checked::checked_int(
+        state, 2, 0, std::numeric_limits<int>::max(),
+        "reserve ammo must be a non-negative 32-bit integer");
     char error[512]{};
     if (!api || !api->weapon_set_reserve ||
         !api->weapon_set_reserve(api->context, entity_index, reserve_index,
@@ -581,7 +640,6 @@ int set_reserve(lua_State* state, int reserve_index, const char* field) {
 int set_reserve1(lua_State* state) {
     return set_reserve(state, 0, "reserve1");
 }
-
 int set_reserve2(lua_State* state) {
     return set_reserve(state, 1, "reserve2");
 }
@@ -589,10 +647,8 @@ int set_reserve2(lua_State* state) {
 int get_ammo(lua_State* state) {
     const auto* api = services(state);
     const int slot = check_slot(state, 1);
-    const int ammo_type = static_cast<int>(luaL_checkinteger(state, 2));
-    if (ammo_type < 0 || ammo_type >= 32) {
-        return luaL_argerror(state, 2, "ammo type must be between 0 and 31");
-    }
+    const int ammo_type = luacs::lua_checked::checked_int(
+        state, 2, 0, 31, "ammo type must be between 0 and 31");
     int value = 0;
     char error[512]{};
     if (!api || !api->weapon_get_ammo ||
@@ -607,14 +663,10 @@ int get_ammo(lua_State* state) {
 int set_ammo(lua_State* state) {
     const auto* api = services(state);
     const int slot = check_slot(state, 1);
-    const int ammo_type = static_cast<int>(luaL_checkinteger(state, 2));
-    const int value = static_cast<int>(luaL_checkinteger(state, 3));
-    if (ammo_type < 0 || ammo_type >= 32) {
-        return luaL_argerror(state, 2, "ammo type must be between 0 and 31");
-    }
-    if (value < 0 || value > 65535) {
-        return luaL_argerror(state, 3, "ammo must be between 0 and 65535");
-    }
+    const int ammo_type = luacs::lua_checked::checked_int(
+        state, 2, 0, 31, "ammo type must be between 0 and 31");
+    const int value = luacs::lua_checked::checked_int(
+        state, 3, 0, 65535, "ammo must be between 0 and 65535");
     char error[512]{};
     return success(state,
                    api && api->weapon_set_ammo &&
@@ -627,9 +679,8 @@ int method_remove(lua_State* state) {
     const auto* api = services(state);
     const int slot = owner_slot(state, 1);
     const int entity_index = check_entity_index(state, 1);
-    const bool delete_entity = lua_isnoneornil(state, 2)
-                                   ? true
-                                   : lua_toboolean(state, 2) != 0;
+    const bool delete_entity =
+        luacs::lua_checked::optional_boolean(state, 2, true);
     char error[512]{};
     if (!api || !api->weapon_remove ||
         !api->weapon_remove(api->context, slot, entity_index, delete_entity,
@@ -675,10 +726,13 @@ int method_switch(lua_State* state) {
 int weapon_tostring(lua_State* state) {
     lua_getfield(state, 1, "classname");
     const char* classname = lua_tostring(state, -1);
+    const std::string stable_classname = classname ? classname : "";
+    lua_pop(state, 1);
     lua_getfield(state, 1, "entity_index");
-    const int index = static_cast<int>(lua_tointeger(state, -1));
-    lua_pushfstring(state, "Weapon(%d, %s)", index,
-                    classname ? classname : "");
+    const lua_Integer index = luaL_checkinteger(state, -1);
+    lua_pop(state, 1);
+    lua_pushfstring(state, "Weapon(%I, %s)", index,
+                    stable_classname.c_str());
     return 1;
 }
 
