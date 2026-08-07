@@ -42,6 +42,7 @@ $errorLogReplacement = @'
         if (reset_error) {
             std::ofstream clear_error_log(g_native_error_log,
                                           std::ios::trunc);
+            if (clear_error_log) clear_error_log.close();
         }
     }
 '@.Replace("`r`n", "`n")
@@ -90,6 +91,7 @@ foreach ($required in @(
     '#include "server_module.h"',
     'std::filesystem::remove(g_native_error_log, reset_error)',
     'std::ofstream clear_error_log(g_native_error_log',
+    'if (clear_error_log) clear_error_log.close();',
     'LuaCSBindGameServerModule(g_server, server_module_error)',
     'CS2 game server module binding failed:',
     'Bound actual CS2 game server module:',
