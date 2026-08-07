@@ -6,7 +6,8 @@
 #include <ISmmPlugin.h>
 #include <iserver.h>
 
-#include <vector>
+#include <array>
+#include <cstddef>
 
 class IGameEvent;
 class IGameEventManager2;
@@ -57,6 +58,8 @@ public:
     const char* GetLogTag() override { return "LUACS"; }
 
 private:
+    static constexpr std::size_t kEventCopyCapacity = 1024;
+
     void remove_hooks();
     void free_event_copies();
 
@@ -71,7 +74,9 @@ private:
     int load_events_hook_id_{-1};
     int fire_event_pre_hook_id_{-1};
     int fire_event_post_hook_id_{-1};
-    std::vector<IGameEvent*> event_copies_;
+    std::array<IGameEvent*, kEventCopyCapacity> event_copies_{};
+    std::size_t event_copy_count_{};
+    std::size_t event_copy_overflow_depth_{};
 };
 
 extern LuaCSPlugin g_LuaCSPlugin;
