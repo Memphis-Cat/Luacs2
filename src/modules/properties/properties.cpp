@@ -250,7 +250,11 @@ std::uint64_t read_uint64_exact(lua_State* state, int index,
     const std::string text(raw, size);
     try {
         std::size_t parsed{};
-        const std::uint64_t value = std::stoull(text, &parsed, 0);
+        const bool hexadecimal =
+            text.size() > 2 && text[0] == '0' &&
+            (text[1] == 'x' || text[1] == 'X');
+        const std::uint64_t value =
+            std::stoull(text, &parsed, hexadecimal ? 16 : 10);
         if (parsed != text.size()) {
             luaL_argerror(state, index,
                           "unsigned/pointer string contains trailing characters");
@@ -824,7 +828,7 @@ bool append_walk(lua_State* state, const AdvancedWorldServices* api,
                 if (child_failure == "nested schema pointer is null") {
                     continue;
                 }
-                failure = std::move(child_failure);
+                failure = child_failure;
                 return false;
             }
         }
