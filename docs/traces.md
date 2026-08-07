@@ -264,16 +264,17 @@ shape_collision_group
 shape_collision_function_mask
 ```
 
-Methods:
+`hit_entity` and `hit_world` are boolean fields. The callable helpers use
+distinct names so those fields cannot shadow methods:
 
 ```lua
 result:did_hit()
-result:hit_world()
-result:hit_entity()
-result:hit_entity(entity_or_player)
+result:did_hit_world()
+result:did_hit_entity()
+result:did_hit_entity(entity_or_player)
 ```
 
-`hit_entity()` with no argument answers whether any entity was hit. With an
+`did_hit_entity()` with no argument answers whether any entity was hit. With an
 argument it compares against that entity's resolved index.
 
 `fraction_left_solid_available` remains `false`: Source 2 `CGameTrace` does not
