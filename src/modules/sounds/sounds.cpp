@@ -1,3 +1,4 @@
+#include "luacs/lua_checked.h"
 #include "luacs/module_api.h"
 #include "luacs/world_module.h"
 
@@ -5,7 +6,10 @@ extern "C" {
 #include "lauxlib.h"
 }
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
+#include <string>
 
 namespace {
 
@@ -51,32 +55,33 @@ std::uint64_t all_players_mask(const Services* api) {
 int slot_from_table(lua_State* state, int index) {
     index = lua_absindex(state, index);
     lua_getfield(state, index, "slot");
-    const int slot = lua_isinteger(state, -1)
-                         ? static_cast<int>(lua_tointeger(state, -1))
-                         : -1;
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return -1;
+    }
+    if (!lua_isinteger(state, -1)) {
+        lua_pop(state, 1);
+        return luaL_argerror(state, index,
+                             "player slot field must be an integer");
+    }
+    const lua_Integer raw = lua_tointeger(state, -1);
     lua_pop(state, 1);
-    return slot;
+    if (raw < 0 || raw >= 64) {
+        return luaL_argerror(state, index,
+                             "player slot must be between 0 and 63");
+    }
+    return static_cast<int>(raw);
 }
 
 bool add_recipient(lua_State* state, int index, std::uint64_t& mask) {
     if (lua_isinteger(state, index)) {
-        const int slot = static_cast<int>(lua_tointeger(state, index));
-        if (slot < 0 || slot >= 64) {
-            luaL_argerror(state, index,
-                          "recipient slot must be between 0 and 63");
-            return false;
-        }
+        const int slot = luacs::lua_checked::checked_slot(state, index);
         mask |= std::uint64_t{1} << slot;
         return true;
     }
     if (lua_istable(state, index)) {
         const int slot = slot_from_table(state, index);
         if (slot >= 0) {
-            if (slot >= 64) {
-                luaL_argerror(state, index,
-                              "recipient slot must be between 0 and 63");
-                return false;
-            }
             mask |= std::uint64_t{1} << slot;
             return true;
         }
@@ -100,9 +105,7 @@ std::uint64_t recipient_mask(lua_State* state, int index,
     luaL_checktype(state, index, LUA_TTABLE);
     const int direct_slot = slot_from_table(state, index);
     if (direct_slot >= 0) {
-        std::uint64_t mask = 0;
-        add_recipient(state, index, mask);
-        return mask;
+        return std::uint64_t{1} << direct_slot;
     }
 
     std::uint64_t mask = 0;
@@ -119,16 +122,30 @@ std::uint64_t recipient_mask(lua_State* state, int index,
 bool read_vector(lua_State* state, int index, Vector3& output) {
     if (lua_isnoneornil(state, index)) return false;
     luaL_checktype(state, index, LUA_TTABLE);
-    lua_getfield(state, index, "x");
+    const int table = lua_absindex(state, index);
+    lua_getfield(state, table, "x");
     output.x = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
-    lua_getfield(state, index, "y");
+    lua_getfield(state, table, "y");
     output.y = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
-    lua_getfield(state, index, "z");
+    lua_getfield(state, table, "z");
     output.z = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
+    if (!std::isfinite(output.x) || !std::isfinite(output.y) ||
+        !std::isfinite(output.z)) {
+        luaL_argerror(state, index, "sound origin components must be finite");
+    }
     return true;
+}
+
+int checked_entity_value(lua_State* state, int argument, lua_Integer raw) {
+    if (raw < 0 || raw > std::numeric_limits<int>::max()) {
+        return luaL_argerror(
+            state, argument,
+            "sound source entity index must be a non-negative 32-bit integer");
+    }
+    return static_cast<int>(raw);
 }
 
 int source_index(lua_State* state, int options_index, const Services* api) {
@@ -140,24 +157,24 @@ int source_index(lua_State* state, int options_index, const Services* api) {
         return 0;
     }
     if (lua_isinteger(state, -1)) {
-        const int index = static_cast<int>(lua_tointeger(state, -1));
+        const lua_Integer raw = lua_tointeger(state, -1);
         lua_pop(state, 1);
-        return index;
+        return checked_entity_value(state, options_index, raw);
     }
     luaL_checktype(state, -1, LUA_TTABLE);
     const int source_table = lua_absindex(state, -1);
     lua_getfield(state, source_table, "entity_index");
     if (lua_isinteger(state, -1)) {
-        const int index = static_cast<int>(lua_tointeger(state, -1));
+        const lua_Integer raw = lua_tointeger(state, -1);
         lua_pop(state, 2);
-        return index;
+        return checked_entity_value(state, options_index, raw);
     }
     lua_pop(state, 1);
     lua_getfield(state, source_table, "pawn_index");
     if (lua_isinteger(state, -1)) {
-        const int index = static_cast<int>(lua_tointeger(state, -1));
+        const lua_Integer raw = lua_tointeger(state, -1);
         lua_pop(state, 2);
-        return index;
+        return checked_entity_value(state, options_index, raw);
     }
     lua_pop(state, 1);
     const int slot = slot_from_table(state, source_table);
@@ -167,16 +184,21 @@ int source_index(lua_State* state, int options_index, const Services* api) {
         char error[128]{};
         if (api->player_state(api->context, slot, &player, error,
                               sizeof(error)) &&
-            player.has_pawn) {
+            player.has_pawn && player.pawn_index >= 0) {
             return player.pawn_index;
         }
+        luaL_argerror(state, options_index,
+                      "sound source player has no live pawn");
     }
-    return 0;
+    return luaL_argerror(
+        state, options_index,
+        "sound source must be an entity index, entity, or player table");
 }
 
 void parse_options(lua_State* state, int index, const Services* api,
                    SoundRequest& request) {
-    if (!lua_istable(state, index)) return;
+    if (lua_isnoneornil(state, index)) return;
+    luaL_checktype(state, index, LUA_TTABLE);
     index = lua_absindex(state, index);
     request.source_entity_index = source_index(state, index, api);
 
@@ -185,42 +207,64 @@ void parse_options(lua_State* state, int index, const Services* api,
     lua_pop(state, 1);
 
     lua_getfield(state, index, "volume");
-    if (lua_isnumber(state, -1)) {
-        request.volume = static_cast<float>(lua_tonumber(state, -1));
+    if (!lua_isnil(state, -1)) {
+        request.volume = static_cast<float>(luaL_checknumber(state, -1));
+        if (!std::isfinite(request.volume) || request.volume < 0.0f ||
+            request.volume > 10.0f) {
+            lua_pop(state, 1);
+            luaL_argerror(state, index,
+                          "volume must be finite and between 0 and 10");
+        }
     }
     lua_pop(state, 1);
 
     lua_getfield(state, index, "pitch");
-    if (lua_isinteger(state, -1)) {
-        request.pitch = static_cast<int>(lua_tointeger(state, -1));
+    if (!lua_isnil(state, -1)) {
+        const lua_Integer raw = luaL_checkinteger(state, -1);
+        if (raw < 1 || raw > 255) {
+            lua_pop(state, 1);
+            luaL_argerror(state, index, "pitch must be between 1 and 255");
+        }
+        request.pitch = static_cast<int>(raw);
     }
     lua_pop(state, 1);
 
     lua_getfield(state, index, "delay");
-    if (lua_isnumber(state, -1)) {
-        request.delay = static_cast<float>(lua_tonumber(state, -1));
+    if (!lua_isnil(state, -1)) {
+        request.delay = static_cast<float>(luaL_checknumber(state, -1));
+        if (!std::isfinite(request.delay) || request.delay < 0.0f ||
+            request.delay > 3600.0f) {
+            lua_pop(state, 1);
+            luaL_argerror(
+                state, index,
+                "delay must be finite and between 0 and 3600 seconds");
+        }
     }
     lua_pop(state, 1);
 
     lua_getfield(state, index, "channel");
-    if (lua_isinteger(state, -1)) {
-        request.channel = static_cast<int>(lua_tointeger(state, -1));
+    if (!lua_isnil(state, -1)) {
+        const lua_Integer raw = luaL_checkinteger(state, -1);
+        if (raw < std::numeric_limits<int>::min() ||
+            raw > std::numeric_limits<int>::max()) {
+            lua_pop(state, 1);
+            luaL_argerror(state, index, "channel must fit a 32-bit integer");
+        }
+        request.channel = static_cast<int>(raw);
     }
     lua_pop(state, 1);
 
     lua_getfield(state, index, "reliable");
-    if (!lua_isnil(state, -1)) request.reliable = lua_toboolean(state, -1) != 0;
+    if (!lua_isnil(state, -1)) {
+        luaL_checktype(state, -1, LUA_TBOOLEAN);
+        request.reliable = lua_toboolean(state, -1) != 0;
+    }
     lua_pop(state, 1);
+}
 
-    if (request.volume < 0.0f || request.volume > 10.0f) {
-        luaL_argerror(state, index, "volume must be between 0 and 10");
-    }
-    if (request.pitch < 1 || request.pitch > 255) {
-        luaL_argerror(state, index, "pitch must be between 1 and 255");
-    }
-    if (request.delay < 0.0f || request.delay > 3600.0f) {
-        luaL_argerror(state, index, "delay must be between 0 and 3600 seconds");
-    }
+bool valid_sound(const SoundInfo& sound) {
+    return sound.valid && sound.guid != 0 && sound.source_entity_index >= 0 &&
+           sound.recipients_mask != 0 && sound.name[0] != '\0';
 }
 
 void push_sound(lua_State* state, const SoundInfo& sound) {
@@ -233,7 +277,7 @@ void push_sound(lua_State* state, const SoundInfo& sound) {
     lua_setfield(state, -2, "stack_hash");
     lua_pushinteger(state, sound.source_entity_index);
     lua_setfield(state, -2, "source_entity_index");
-    lua_pushinteger(state, static_cast<lua_Integer>(sound.recipients_mask));
+    luacs::lua_checked::push_u64_exact(state, sound.recipients_mask);
     lua_setfield(state, -2, "recipients_mask");
     lua_pushinteger(state, sound.channel);
     lua_setfield(state, -2, "channel");
@@ -248,9 +292,15 @@ int emit_impl(lua_State* state, bool everyone) {
     const auto* api = world(state);
     const int sound_index = everyone ? 1 : 2;
     const int options_index = everyone ? 2 : 3;
-    const char* sound_name = luaL_checkstring(state, sound_index);
-    if (!sound_name[0]) {
+    std::size_t name_size = 0;
+    const char* sound_name = luaL_checklstring(state, sound_index, &name_size);
+    if (!sound_name || name_size == 0) {
         return luaL_argerror(state, sound_index, "sound name cannot be empty");
+    }
+    const std::string sound_name_storage(sound_name, name_size);
+    if (sound_name_storage.find('\0') != std::string::npos) {
+        return luaL_argerror(state, sound_index,
+                             "sound name cannot contain NUL bytes");
     }
 
     SoundRequest request;
@@ -265,9 +315,13 @@ int emit_impl(lua_State* state, bool everyone) {
     SoundInfo output;
     char error[512]{};
     if (!api || !api->sound_emit ||
-        !api->sound_emit(api->context, sound_name, &request, &output, error,
-                         sizeof(error))) {
-        return fail(state, error[0] ? error : "sound emission service is unavailable");
+        !api->sound_emit(api->context, sound_name_storage.c_str(), &request,
+                         &output, error, sizeof(error))) {
+        return fail(state,
+                    error[0] ? error : "sound emission service is unavailable");
+    }
+    if (!valid_sound(output)) {
+        return fail(state, "Source 2 returned invalid sound state");
     }
     push_sound(state, output);
     return 1;
@@ -286,18 +340,28 @@ bool sound_fields(lua_State* state, int index, std::uint32_t& guid,
         lua_pop(state, 1);
         return false;
     }
-    guid = static_cast<std::uint32_t>(lua_tointeger(state, -1));
+    const lua_Integer raw_guid = lua_tointeger(state, -1);
     lua_pop(state, 1);
+    if (raw_guid <= 0 ||
+        static_cast<std::uint64_t>(raw_guid) >
+            std::numeric_limits<std::uint32_t>::max()) {
+        luaL_argerror(state, index, "sound object contains an invalid GUID");
+    }
+    guid = static_cast<std::uint32_t>(raw_guid);
+
     lua_getfield(state, index, "recipients_mask");
-    recipients = lua_isinteger(state, -1)
-                     ? static_cast<std::uint64_t>(lua_tointeger(state, -1))
-                     : 0;
+    recipients = luacs::lua_checked::read_u64_exact(
+        state, -1, "sound recipients mask");
     lua_pop(state, 1);
+
     lua_getfield(state, index, "channel");
-    channel = lua_isinteger(state, -1)
-                  ? static_cast<int>(lua_tointeger(state, -1))
-                  : 0;
+    const lua_Integer raw_channel = luaL_checkinteger(state, -1);
     lua_pop(state, 1);
+    if (raw_channel < std::numeric_limits<int>::min() ||
+        raw_channel > std::numeric_limits<int>::max()) {
+        luaL_argerror(state, index, "sound object contains an invalid channel");
+    }
+    channel = static_cast<int>(raw_channel);
     return true;
 }
 
@@ -307,21 +371,25 @@ int stop(lua_State* state) {
     std::uint32_t guid = 0;
     std::uint64_t original_recipients = 0;
     int channel = 0;
-    const bool object = sound_fields(state, 1, guid, original_recipients, channel);
+    const bool object =
+        sound_fields(state, 1, guid, original_recipients, channel);
     if (!object) {
-        guid = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+        guid = luacs::lua_checked::checked_u32(
+            state, 1, "sound GUID must fit an unsigned 32-bit integer");
+        if (guid == 0) return luaL_argerror(state, 1, "sound GUID must be non-zero");
     }
     const std::uint64_t recipients = recipient_mask(
         state, 2, root,
         original_recipients ? original_recipients : all_players_mask(root));
-    const bool reliable = lua_isnoneornil(state, 3)
-                              ? true
-                              : lua_toboolean(state, 3) != 0;
+    if (recipients == 0) return fail(state, "sound recipient filter is empty");
+    const bool reliable =
+        luacs::lua_checked::optional_boolean(state, 3, true);
     char error[256]{};
     if (!api || !api->sound_stop ||
         !api->sound_stop(api->context, guid, recipients, reliable, error,
                          sizeof(error))) {
-        return fail(state, error[0] ? error : "sound stop service is unavailable");
+        return fail(state,
+                    error[0] ? error : "sound stop service is unavailable");
     }
     if (object) {
         lua_pushboolean(state, false);
@@ -334,12 +402,14 @@ int stop(lua_State* state) {
 int stop_channel(lua_State* state) {
     const auto* root = services(state);
     const auto* api = world(state);
-    const int channel = static_cast<int>(luaL_checkinteger(state, 1));
-    const std::uint64_t recipients = recipient_mask(
-        state, 2, root, all_players_mask(root));
-    const bool reliable = lua_isnoneornil(state, 3)
-                              ? true
-                              : lua_toboolean(state, 3) != 0;
+    const int channel = luacs::lua_checked::checked_int(
+        state, 1, std::numeric_limits<int>::min(),
+        std::numeric_limits<int>::max(), "channel must fit a 32-bit integer");
+    const std::uint64_t recipients =
+        recipient_mask(state, 2, root, all_players_mask(root));
+    if (recipients == 0) return fail(state, "sound recipient filter is empty");
+    const bool reliable =
+        luacs::lua_checked::optional_boolean(state, 3, true);
     char error[256]{};
     if (!api || !api->sound_stop_channel) {
         return fail(state, "sound channel service is unavailable");
@@ -354,9 +424,12 @@ int stop_channel(lua_State* state) {
 int sound_tostring(lua_State* state) {
     lua_getfield(state, 1, "name");
     const char* name = lua_tostring(state, -1);
+    const std::string stable_name = name ? name : "";
+    lua_pop(state, 1);
     lua_getfield(state, 1, "guid");
-    const auto guid = lua_tointeger(state, -1);
-    lua_pushfstring(state, "Sound(%I, %s)", guid, name ? name : "");
+    const lua_Integer guid = luaL_checkinteger(state, -1);
+    lua_pop(state, 1);
+    lua_pushfstring(state, "Sound(%I, %s)", guid, stable_name.c_str());
     return 1;
 }
 
