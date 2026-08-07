@@ -1,36 +1,73 @@
 #include "runtime.h"
 #include "runtime_helpers.h"
 
+#include "luacs/lua_checked.h"
+
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <exception>
+#include <filesystem>
+#include <limits>
 #include <sstream>
+#include <string>
+#include <system_error>
 
 namespace luacs {
 using namespace detail;
+
+namespace {
+
+std::string path_text(const std::filesystem::path& path) {
+    const auto utf8 = path.u8string();
+    return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
+}
+
+std::filesystem::path path_from_utf8(const char* value, std::size_t size) {
+    if (!value) return {};
+    return std::filesystem::u8path(value, value + size);
+}
+
+} // namespace
 
 int Runtime::lua_print(lua_State* state) {
     lua_getfield(state, LUA_REGISTRYINDEX, kVmRegistryKey);
     auto* vm = static_cast<ScriptVm*>(lua_touserdata(state, -1));
     lua_pop(state, 1);
     if (!vm || !vm->runtime) return 0;
-    std::ostringstream line;
-    const int count = lua_gettop(state);
-    for (int index = 1; index <= count; ++index) {
-        if (index > 1) line << '\t';
-        size_t length = 0;
-        const char* value = luaL_tolstring(state, index, &length);
-        if (value) line.write(value, static_cast<std::streamsize>(length));
-        lua_pop(state, 1);
+
+    try {
+        std::string line;
+        const int count = lua_gettop(state);
+        for (int index = 1; index <= count; ++index) {
+            if (index > 1) line.push_back('\t');
+            std::size_t length = 0;
+            const char* value = luaL_tolstring(state, index, &length);
+            if (value && length != 0) line.append(value, length);
+            lua_pop(state, 1);
+        }
+        vm->runtime->log(*vm, line);
+    } catch (const std::exception& exception) {
+        return luaL_error(state, "print failed: %s", exception.what());
+    } catch (...) {
+        return luaL_error(state, "print failed with an unknown C++ exception");
     }
-    vm->runtime->log(*vm, line.str());
     return 0;
 }
 
 int Runtime::lua_vector(lua_State* state) {
-    const double x = luaL_optnumber(state, 1, 0.0);
-    const double y = luaL_optnumber(state, 2, 0.0);
-    const double z = luaL_optnumber(state, 3, 0.0);
+    const double x = lua_isnoneornil(state, 1)
+                         ? 0.0
+                         : lua_checked::finite_number(
+                               state, 1, "Vector x component must be finite");
+    const double y = lua_isnoneornil(state, 2)
+                         ? 0.0
+                         : lua_checked::finite_number(
+                               state, 2, "Vector y component must be finite");
+    const double z = lua_isnoneornil(state, 3)
+                         ? 0.0
+                         : lua_checked::finite_number(
+                               state, 3, "Vector z component must be finite");
     lua_createtable(state, 0, 4);
     lua_pushnumber(state, x);
     lua_setfield(state, -2, "x");
@@ -46,17 +83,17 @@ int Runtime::lua_vector(lua_State* state) {
 }
 
 int Runtime::lua_color(lua_State* state) {
-    const lua_Integer r = luaL_checkinteger(state, 1);
-    const lua_Integer g = luaL_checkinteger(state, 2);
-    const lua_Integer b = luaL_checkinteger(state, 3);
-    const lua_Integer a = luaL_optinteger(state, 4, 255);
-    auto valid = [](lua_Integer value) {
-        return value >= 0 && value <= 255;
-    };
-    if (!valid(r) || !valid(g) || !valid(b) || !valid(a)) {
-        return luaL_error(state,
-                          "Color channels must be between 0 and 255");
-    }
+    const int r = lua_checked::checked_int(
+        state, 1, 0, 255, "Color red channel must be between 0 and 255");
+    const int g = lua_checked::checked_int(
+        state, 2, 0, 255, "Color green channel must be between 0 and 255");
+    const int b = lua_checked::checked_int(
+        state, 3, 0, 255, "Color blue channel must be between 0 and 255");
+    const int a = lua_isnoneornil(state, 4)
+                      ? 255
+                      : lua_checked::checked_int(
+                            state, 4, 0, 255,
+                            "Color alpha channel must be between 0 and 255");
     lua_createtable(state, 0, 5);
     lua_pushinteger(state, r);
     lua_setfield(state, -2, "r");
@@ -74,39 +111,61 @@ int Runtime::lua_color(lua_State* state) {
 }
 
 int Runtime::lua_value_tostring(lua_State* state) {
+    luaL_checktype(state, 1, LUA_TTABLE);
     lua_getfield(state, 1, "__type");
     const char* type = lua_tostring(state, -1);
+    const std::string stable_type = type ? type : "";
     lua_pop(state, 1);
-    std::ostringstream result;
-    if (type && std::string_view(type) == "Vector") {
-        lua_getfield(state, 1, "x");
-        const double x = lua_tonumber(state, -1);
-        lua_pop(state, 1);
-        lua_getfield(state, 1, "y");
-        const double y = lua_tonumber(state, -1);
-        lua_pop(state, 1);
-        lua_getfield(state, 1, "z");
-        const double z = lua_tonumber(state, -1);
-        lua_pop(state, 1);
-        result << "Vector(" << x << ", " << y << ", " << z << ")";
-    } else {
-        lua_getfield(state, 1, "r");
-        const auto r = lua_tointeger(state, -1);
-        lua_pop(state, 1);
-        lua_getfield(state, 1, "g");
-        const auto g = lua_tointeger(state, -1);
-        lua_pop(state, 1);
-        lua_getfield(state, 1, "b");
-        const auto b = lua_tointeger(state, -1);
-        lua_pop(state, 1);
-        lua_getfield(state, 1, "a");
-        const auto a = lua_tointeger(state, -1);
-        lua_pop(state, 1);
-        result << "Color(" << r << ", " << g << ", " << b << ", " << a
-               << ")";
+
+    try {
+        std::ostringstream result;
+        if (stable_type == "Vector") {
+            lua_getfield(state, 1, "x");
+            const double x = lua_checked::finite_number(
+                state, -1, "Vector x component must be finite");
+            lua_pop(state, 1);
+            lua_getfield(state, 1, "y");
+            const double y = lua_checked::finite_number(
+                state, -1, "Vector y component must be finite");
+            lua_pop(state, 1);
+            lua_getfield(state, 1, "z");
+            const double z = lua_checked::finite_number(
+                state, -1, "Vector z component must be finite");
+            lua_pop(state, 1);
+            result << "Vector(" << x << ", " << y << ", " << z << ")";
+        } else if (stable_type == "Color") {
+            lua_getfield(state, 1, "r");
+            const int r = lua_checked::checked_int(
+                state, -1, 0, 255, "Color red channel is invalid");
+            lua_pop(state, 1);
+            lua_getfield(state, 1, "g");
+            const int g = lua_checked::checked_int(
+                state, -1, 0, 255, "Color green channel is invalid");
+            lua_pop(state, 1);
+            lua_getfield(state, 1, "b");
+            const int b = lua_checked::checked_int(
+                state, -1, 0, 255, "Color blue channel is invalid");
+            lua_pop(state, 1);
+            lua_getfield(state, 1, "a");
+            const int a = lua_checked::checked_int(
+                state, -1, 0, 255, "Color alpha channel is invalid");
+            lua_pop(state, 1);
+            result << "Color(" << r << ", " << g << ", " << b << ", " << a
+                   << ")";
+        } else {
+            return luaL_error(state, "unknown LuaCS value type '%s'",
+                              stable_type.c_str());
+        }
+        const std::string text = result.str();
+        lua_pushlstring(state, text.data(), text.size());
+        return 1;
+    } catch (const std::exception& exception) {
+        return luaL_error(state, "value formatting failed: %s",
+                          exception.what());
+    } catch (...) {
+        return luaL_error(state,
+                          "value formatting failed with an unknown C++ exception");
     }
-    lua_pushstring(state, result.str().c_str());
-    return 1;
 }
 
 int Runtime::lua_module_searcher(lua_State* state) {
@@ -122,21 +181,34 @@ int Runtime::lua_module_searcher(lua_State* state) {
         lua_pushcfunction(state, &Runtime::lua_cs2_root_loader);
         return 1;
     }
+
     const auto path = module_path(runtime->bin_dir_, name);
-    if (path.empty() || !std::filesystem::exists(path)) {
+    std::error_code exists_error;
+    const bool exists = !path.empty() &&
+                        std::filesystem::exists(path, exists_error);
+    if (exists_error || !exists) {
+        const std::string directory = path_text(runtime->bin_dir_);
         lua_pushfstring(state, "\n\tno LuaCS module '%s' in %s", name,
-                        runtime->bin_dir_.string().c_str());
+                        directory.c_str());
         return 1;
     }
-    lua_pushstring(state, path.string().c_str());
+
+    const std::string utf8_path = path_text(path);
+    lua_pushlstring(state, utf8_path.data(), utf8_path.size());
     lua_pushstring(state, name);
     lua_pushcclosure(state, &Runtime::lua_module_loader, 2);
     return 1;
 }
 
 int Runtime::lua_module_loader(lua_State* state) {
-    const char* path = lua_tostring(state, lua_upvalueindex(1));
+    std::size_t path_size = 0;
+    const char* path =
+        lua_tolstring(state, lua_upvalueindex(1), &path_size);
     const char* module_name = lua_tostring(state, lua_upvalueindex(2));
+    if (!path || path_size == 0 || !module_name || !module_name[0]) {
+        return luaL_error(state, "LuaCS native module loader metadata is invalid");
+    }
+
     lua_getfield(state, LUA_REGISTRYINDEX, kRuntimeRegistryKey);
     auto* runtime = static_cast<Runtime*>(lua_touserdata(state, -1));
     lua_pop(state, 1);
@@ -148,15 +220,21 @@ int Runtime::lua_module_loader(lua_State* state) {
     }
 
     HMODULE handle = nullptr;
-    {
-        const auto wide_path = std::filesystem::path(path).wstring();
-        handle = LoadLibraryW(wide_path.c_str());
+    std::filesystem::path native_path;
+    try {
+        native_path = path_from_utf8(path, path_size);
+        handle = LoadLibraryW(native_path.c_str());
+    } catch (const std::exception& exception) {
+        return luaL_error(state, "could not decode native module path: %s",
+                          exception.what());
     }
     if (!handle) {
+        const DWORD code = GetLastError();
         return luaL_error(state,
                           "could not load native module %s (Windows error %lu)",
-                          path, GetLastError());
+                          path, static_cast<unsigned long>(code));
     }
+
     auto open = reinterpret_cast<OpenModuleFn>(
         GetProcAddress(handle, "LuaCS_OpenModule"));
     if (!open) {
@@ -178,7 +256,21 @@ int Runtime::lua_module_loader(lua_State* state) {
         return luaL_error(state, "module %s returned an invalid module table",
                           module_name);
     }
-    vm->module_handles.push_back(handle);
+
+    try {
+        vm->module_handles.push_back(handle);
+    } catch (const std::exception& exception) {
+        lua_pop(state, 1);
+        FreeLibrary(handle);
+        return luaL_error(state, "could not retain module %s: %s", module_name,
+                          exception.what());
+    } catch (...) {
+        lua_pop(state, 1);
+        FreeLibrary(handle);
+        return luaL_error(state,
+                          "could not retain module %s due to an unknown C++ exception",
+                          module_name);
+    }
     return 1;
 }
 
@@ -191,12 +283,19 @@ int Runtime::lua_native_open_trampoline(lua_State* state) {
         return luaL_error(state,
                           "native module loader state is invalid");
     }
-    const int results = open(state, services);
-    if (results != 1) {
-        return luaL_error(state,
-                          "native module must return exactly one value");
+    try {
+        const int results = open(state, services);
+        if (results != 1) {
+            return luaL_error(state,
+                              "native module must return exactly one value");
+        }
+        return 1;
+    } catch (const std::exception& exception) {
+        return luaL_error(state, "native module threw C++ exception: %s",
+                          exception.what());
+    } catch (...) {
+        return luaL_error(state, "native module threw an unknown C++ exception");
     }
-    return 1;
 }
 
 int Runtime::lua_cs2_root_loader(lua_State* state) {
@@ -252,9 +351,24 @@ bool Runtime::install_core(ScriptVm& vm) {
     lua_pop(state, 1);
 
     lua_getglobal(state, "package");
+    if (!lua_istable(state, -1)) {
+        lua_pop(state, 1);
+        log(vm, "[ERROR] Lua package table is unavailable.");
+        return false;
+    }
     lua_getfield(state, -1, "searchers");
+    if (!lua_istable(state, -1)) {
+        lua_pop(state, 2);
+        log(vm, "[ERROR] Lua package.searchers table is unavailable.");
+        return false;
+    }
     const lua_Integer length =
         static_cast<lua_Integer>(lua_rawlen(state, -1));
+    if (length >= std::numeric_limits<lua_Integer>::max()) {
+        lua_pop(state, 2);
+        log(vm, "[ERROR] Lua package.searchers table is too large.");
+        return false;
+    }
     for (lua_Integer index = length + 1; index > 2; --index) {
         lua_geti(state, -1, index - 1);
         lua_seti(state, -2, index);
@@ -266,6 +380,11 @@ bool Runtime::install_core(ScriptVm& vm) {
     const auto require_global = [&](const char* module_name,
                                     const char* global_name) {
         lua_getglobal(state, "require");
+        if (!lua_isfunction(state, -1)) {
+            lua_pop(state, 1);
+            log(vm, "[ERROR] Lua require function is unavailable.");
+            return false;
+        }
         lua_pushstring(state, module_name);
         if (!protected_call(vm, 1, 1,
                             std::string("loading core module '") +
@@ -284,7 +403,18 @@ bool Runtime::install_core(ScriptVm& vm) {
 
 bool Runtime::protected_call(ScriptVm& vm, int argument_count,
                              int result_count, std::string_view context) {
-    const int function_index = lua_gettop(vm.state) - argument_count;
+    const int top = lua_gettop(vm.state);
+    if (argument_count < 0 || top < argument_count + 1) {
+        log(vm, std::string(context) +
+                    " failed: invalid protected-call stack state");
+        return false;
+    }
+    const int function_index = top - argument_count;
+    if (!lua_isfunction(vm.state, function_index)) {
+        log(vm, std::string(context) +
+                    " failed: protected-call target is not a function");
+        return false;
+    }
     lua_pushcfunction(vm.state, &Runtime::lua_traceback);
     lua_insert(vm.state, function_index);
     const int status = lua_pcall(vm.state, argument_count, result_count,
@@ -303,7 +433,7 @@ void Runtime::push_player(lua_State* state,
     lua_createtable(state, 0, 10);
     push_integer_field(state, "slot", player.slot);
     push_string_field(state, "name", player.name);
-    lua_pushinteger(state, static_cast<lua_Integer>(player.steam64));
+    lua_checked::push_u64_exact(state, player.steam64);
     lua_setfield(state, -2, "steam64");
     push_string_field(state, "steamid",
                       player.steam_id.empty()
@@ -352,11 +482,14 @@ std::pair<std::string, std::string> Runtime::parse_command(
         }
         rest.erase(rest.begin());
         const auto split = rest.find_first_of(" \t");
-        return {normalize_name(rest.substr(0, split)),
+        const std::string command = normalize_name(rest.substr(0, split));
+        if (command.empty()) return {};
+        return {command,
                 split == std::string::npos
                     ? std::string{}
                     : trim(std::string_view(rest).substr(split + 1))};
     }
+    if (first.empty()) return {};
     return {first, rest};
 }
 
