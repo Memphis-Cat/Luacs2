@@ -7,6 +7,7 @@ function(luacs_inject_generated_sources)
 
     set(found_original_game_api FALSE)
     set(found_original_plugin FALSE)
+    set(found_sourcehook_hookman FALSE)
     foreach(source IN LISTS luacs_sources)
         if(source MATCHES "(^|[/\\\\])game_api\\.cpp$")
             set_source_files_properties(
@@ -20,6 +21,8 @@ function(luacs_inject_generated_sources)
                 TARGET_DIRECTORY luacs2
                 PROPERTIES HEADER_FILE_ONLY TRUE)
             set(found_original_plugin TRUE)
+        elseif(source MATCHES "(^|[/\\\\])sourcehook_impl_chookmaninfo\\.cpp$")
+            set(found_sourcehook_hookman TRUE)
         endif()
     endforeach()
 
@@ -31,6 +34,10 @@ function(luacs_inject_generated_sources)
         message(FATAL_ERROR
             "The original plugin.cpp source was not found in the LuaCS target.")
     endif()
+    if(NOT found_sourcehook_hookman)
+        message(FATAL_ERROR
+            "LuaCS target is missing required SourceHook sourcehook_impl_chookmaninfo.cpp.")
+    endif()
 
     set(generated_game_api
         "${CMAKE_BINARY_DIR}/generated/plugin/game_api.cpp")
@@ -38,14 +45,11 @@ function(luacs_inject_generated_sources)
         "${CMAKE_BINARY_DIR}/generated/plugin/plugin.cpp")
     set(server_module_source
         "${CMAKE_SOURCE_DIR}/src/plugin/server_module.cpp")
-    set(sourcehook_hookman_source
-        "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_chookmaninfo.cpp")
 
     foreach(required_source IN ITEMS
             "${generated_game_api}"
             "${generated_plugin}"
-            "${server_module_source}"
-            "${sourcehook_hookman_source}")
+            "${server_module_source}")
         if(NOT EXISTS "${required_source}")
             message(FATAL_ERROR
                 "Required LuaCS generated/module source is missing: ${required_source}")
@@ -55,10 +59,9 @@ function(luacs_inject_generated_sources)
     target_sources(luacs2 PRIVATE
         "${generated_game_api}"
         "${generated_plugin}"
-        "${server_module_source}"
-        "${sourcehook_hookman_source}")
+        "${server_module_source}")
     message(STATUS
-        "Using generated disk-backed scanner, live game server module binding, and complete SourceHook implementation set")
+        "Using generated disk-backed scanner and live game server module binding; complete SourceHook implementation set verified")
 endfunction()
 
 cmake_language(DEFER CALL luacs_inject_generated_sources)
