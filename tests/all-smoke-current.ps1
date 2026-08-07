@@ -54,6 +54,7 @@ $tests = @(
     "hardening-contract-smoke.ps1",
     "plugin-quarantine-smoke.ps1",
     "legacy-example-cleanup-smoke.ps1",
+    "live-test-pack-smoke.ps1",
     "deploy-smoke.ps1"
 )
 
