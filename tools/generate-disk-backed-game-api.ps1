@@ -48,6 +48,65 @@ $legacy = $legacy.Replace("`r`n", "`n")
 $replacement = @'
 thread_local std::string g_pattern_scan_diagnostic;
 
+bool readable_memory(const void* address, std::size_t size) {
+    if (size == 0) return true;
+    if (!address) return false;
+
+    const auto start = reinterpret_cast<std::uintptr_t>(address);
+    if (size > std::numeric_limits<std::uintptr_t>::max() - start) {
+        return false;
+    }
+    const auto end = start + size;
+    std::uintptr_t cursor = start;
+
+    while (cursor < end) {
+        MEMORY_BASIC_INFORMATION information{};
+        const SIZE_T queried = VirtualQuery(
+            reinterpret_cast<const void*>(cursor), &information,
+            sizeof(information));
+        if (queried != sizeof(information) ||
+            information.State != MEM_COMMIT) {
+            return false;
+        }
+
+        const DWORD protection = information.Protect;
+        if ((protection & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+            return false;
+        }
+        const DWORD base_protection = protection & 0xFFu;
+        switch (base_protection) {
+            case PAGE_READONLY:
+            case PAGE_READWRITE:
+            case PAGE_WRITECOPY:
+            case PAGE_EXECUTE_READ:
+            case PAGE_EXECUTE_READWRITE:
+            case PAGE_EXECUTE_WRITECOPY:
+                break;
+            default:
+                return false;
+        }
+
+        const auto region_start =
+            reinterpret_cast<std::uintptr_t>(information.BaseAddress);
+        if (information.RegionSize == 0 ||
+            information.RegionSize >
+                std::numeric_limits<std::uintptr_t>::max() - region_start) {
+            return false;
+        }
+        const auto region_end = region_start + information.RegionSize;
+        if (cursor < region_start || cursor >= region_end) return false;
+        cursor = std::min(end, region_end);
+    }
+    return true;
+}
+
+template <typename T>
+bool read_live_value(const void* address, T& value) {
+    if (!readable_memory(address, sizeof(T))) return false;
+    std::memcpy(&value, address, sizeof(T));
+    return true;
+}
+
 void* find_pattern(HMODULE module, std::string_view text) {
     g_pattern_scan_diagnostic.clear();
     if (!module) {
@@ -196,11 +255,18 @@ void* find_pattern(HMODULE module, std::string_view text) {
                 return nullptr;
             }
 
+            void* live_match = live_base + rva;
+            if (!readable_memory(live_match, pattern.size())) {
+                g_pattern_scan_diagnostic =
+                    "disk match could not safely map to readable live memory";
+                return nullptr;
+            }
+
             std::ostringstream diagnostic;
             diagnostic << "matched disk image '" << disk_path.string()
                        << "' at RVA " << rva;
             g_pattern_scan_diagnostic = diagnostic.str();
-            return live_base + rva;
+            return live_match;
         }
     }
 
@@ -216,16 +282,61 @@ void* find_pattern(HMODULE module, std::string_view text) {
 '@
 $replacement = $replacement.Replace("`r`n", "`n")
 
+$vtableLegacy = @'
+        if (descriptor_reference < read_only->data + 0x0C) continue;
+        auto* locator = descriptor_reference - 0x0C;
+        if (*reinterpret_cast<std::int32_t*>(locator) != 1) continue;
+        if (*reinterpret_cast<std::int32_t*>(descriptor_reference - 0x08) != 0) {
+            continue;
+        }
+'@
+$vtableLegacy = $vtableLegacy.Replace("`r`n", "`n")
+$vtableReplacement = @'
+        if (descriptor_reference < read_only->data + 0x0C) continue;
+        auto* locator = descriptor_reference - 0x0C;
+        std::int32_t locator_signature{};
+        std::int32_t locator_offset{};
+        if (!read_live_value(locator, locator_signature) ||
+            locator_signature != 1) {
+            continue;
+        }
+        if (!read_live_value(descriptor_reference - 0x08, locator_offset) ||
+            locator_offset != 0) {
+            continue;
+        }
+'@
+$vtableReplacement = $vtableReplacement.Replace("`r`n", "`n")
+
 $occurrences = ([regex]::Matches($text, [regex]::Escape($legacy))).Count
 if ($occurrences -ne 1) {
     throw "expected exactly one legacy live-image pattern scanner, found $occurrences"
 }
+$vtableOccurrences = ([regex]::Matches(
+    $text, [regex]::Escape($vtableLegacy))).Count
+if ($vtableOccurrences -ne 1) {
+    throw "expected exactly one raw live RTTI dereference block, found $vtableOccurrences"
+}
 
 $updated = $text.Replace($legacy, $replacement)
+$updated = $updated.Replace($vtableLegacy, $vtableReplacement)
 if ($updated.Contains('offset <= image_size - pattern.size()')) {
     throw 'legacy whole-image live memory scan remains after generation'
 }
+foreach ($obsolete in @(
+    '*reinterpret_cast<std::int32_t*>(locator)',
+    '*reinterpret_cast<std::int32_t*>(descriptor_reference - 0x08)'
+)) {
+    if ($updated.Contains($obsolete)) {
+        throw "generated game API still contains unsafe live dereference '$obsolete'"
+    }
+}
 foreach ($required in @(
+    'VirtualQuery(',
+    'readable_memory(',
+    'read_live_value(',
+    'PAGE_GUARD | PAGE_NOACCESS',
+    'if (!readable_memory(live_match, pattern.size()))',
+    'could not safely map to readable live memory',
     'GetModuleFileNameW',
     'IMAGE_SCN_MEM_EXECUTE',
     'PointerToRawData',
@@ -247,4 +358,4 @@ $destinationDirectory = Split-Path -Parent $Destination
     $updated,
     [System.Text.UTF8Encoding]::new($false))
 
-Write-Host 'Generated disk-backed executable-section scanner with deep diagnostics.'
+Write-Host 'Generated disk-backed executable-section scanner with guarded live-memory diagnostics.'
