@@ -44,6 +44,10 @@ endfunction()
 
 file(GLOB LUA_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/thirdparty/lua-5.5.1/src/*.c")
 list(FILTER LUA_SOURCES EXCLUDE REGEX "/(lua|luac|onelua)\\.c$")
+# Lua's protected-error implementation uses C++ exceptions when its core is
+# compiled as C++. Our LuaCS modules are C++ and own RAII objects across Lua API
+# calls, so this prevents Lua errors from longjmp-ing across C++ destructors.
+set_source_files_properties(${LUA_SOURCES} PROPERTIES LANGUAGE CXX)
 add_library(lua55 SHARED ${LUA_SOURCES})
 target_include_directories(lua55 PUBLIC "${CMAKE_SOURCE_DIR}/thirdparty/lua-5.5.1/src")
 target_compile_definitions(lua55 PRIVATE LUA_BUILD_AS_DLL)
@@ -225,7 +229,6 @@ add_library(luacs2 SHARED
     "${HL2SDK_CS2_ROOT}/tier1/convar.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_chookidman.cpp"
-    "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_chookmaninfo.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_cvfnptr.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_cproto.cpp")
 
