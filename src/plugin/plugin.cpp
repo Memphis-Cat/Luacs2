@@ -8,13 +8,14 @@
 #include <tier0/dbg.h>
 #include <tier1/convar.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <vector>
+#include <system_error>
 
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
 SH_DECL_HOOK4_void(IServerGameClients, ClientActive, SH_NOATTRIB, 0,
@@ -47,12 +48,20 @@ namespace {
 bool g_lua_command_registered = false;
 std::filesystem::path g_native_error_log;
 
+std::string path_text(const std::filesystem::path& path) {
+    const auto utf8 = path.u8string();
+    return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
+}
+
 std::filesystem::path module_path() {
     HMODULE module{};
-    GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCWSTR>(&module_path), &module);
+    if (!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&module_path), &module) ||
+        !module) {
+        return {};
+    }
 
     std::wstring buffer(32768, L'\0');
     const DWORD length = GetModuleFileNameW(
@@ -91,11 +100,23 @@ std::string windows_error(DWORD code) {
     return message;
 }
 
+void release_lua_dependency() {
+    if (!g_lua_module) return;
+    FreeLibrary(g_lua_module);
+    g_lua_module = nullptr;
+}
+
 bool preload_lua(const std::filesystem::path& native_directory,
                  std::string& error) {
+    release_lua_dependency();
     const auto lua_path = native_directory / "lua55.dll";
-    if (!std::filesystem::exists(lua_path)) {
-        error = "Required dependency was not found: " + lua_path.string();
+    std::error_code exists_error;
+    const bool exists = std::filesystem::is_regular_file(lua_path, exists_error);
+    if (exists_error || !exists) {
+        error = exists_error
+                    ? "Could not inspect required Lua dependency: " +
+                          exists_error.message()
+                    : "Required dependency was not found: " + path_text(lua_path);
         return false;
     }
 
@@ -104,7 +125,7 @@ bool preload_lua(const std::filesystem::path& native_directory,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!g_lua_module) {
         const DWORD code = GetLastError();
-        error = "Could not load " + lua_path.string() + ": " +
+        error = "Could not load " + path_text(lua_path) + ": " +
                 windows_error(code) + " (" + std::to_string(code) + ")";
         return false;
     }
@@ -113,7 +134,9 @@ bool preload_lua(const std::filesystem::path& native_directory,
 
 void copy_error(char* destination, size_t maximum, const std::string& value) {
     if (!destination || maximum == 0) return;
-    std::snprintf(destination, maximum, "%s", value.c_str());
+    const std::size_t copy = std::min(value.size(), maximum - 1);
+    if (copy != 0) std::memcpy(destination, value.data(), copy);
+    destination[copy] = '\0';
 }
 
 Color line_color(std::string_view line) {
@@ -143,7 +166,8 @@ void append_native_error(std::string_view line) {
                                         directory_error);
     if (directory_error) return;
 
-    std::ofstream output(g_native_error_log, std::ios::app);
+    std::ofstream output(g_native_error_log,
+                         std::ios::app | std::ios::binary);
     if (!output) return;
 
     SYSTEMTIME now{};
@@ -157,13 +181,31 @@ void append_native_error(std::string_view line) {
                   static_cast<unsigned>(now.wHour),
                   static_cast<unsigned>(now.wMinute),
                   static_cast<unsigned>(now.wSecond));
-    output << timestamp << line << '\n';
+    output.write(timestamp, static_cast<std::streamsize>(std::strlen(timestamp)));
+    if (!line.empty()) {
+        output.write(line.data(), static_cast<std::streamsize>(
+                                      std::min<std::size_t>(line.size(), 1u << 20))));
+    }
+    output.put('\n');
 }
 
 void write_console(std::string_view line) {
     append_native_error(line);
     const auto color = line_color(line);
-    ConColorMsg(color, "%.*s\n", static_cast<int>(line.size()), line.data());
+    constexpr std::size_t kConsoleChunk = 4096;
+    if (line.empty()) {
+        ConColorMsg(color, "\n");
+        return;
+    }
+    std::size_t offset = 0;
+    while (offset < line.size()) {
+        const std::size_t chunk =
+            std::min(kConsoleChunk, line.size() - offset);
+        ConColorMsg(color, "%.*s", static_cast<int>(chunk),
+                    line.data() + offset);
+        offset += chunk;
+    }
+    ConColorMsg(color, "\n");
 }
 
 void command_lua(const CCommandContext&, const CCommand& command) {
@@ -172,14 +214,21 @@ void command_lua(const CCommandContext&, const CCommand& command) {
         return;
     }
 
-    std::string command_line = "lua";
-    for (int index = 1; index < command.ArgC(); ++index) {
-        const char* argument = command.Arg(index);
-        if (!argument) continue;
-        command_line.push_back(' ');
-        command_line += argument;
+    try {
+        std::string command_line = "lua";
+        for (int index = 1; index < command.ArgC(); ++index) {
+            const char* argument = command.Arg(index);
+            if (!argument) continue;
+            command_line.push_back(' ');
+            command_line += argument;
+        }
+        g_runtime->client_command(-1, command_line);
+    } catch (const std::exception& exception) {
+        write_console("[ERROR] (lua) Console command handling threw: " +
+                      std::string(exception.what()));
+    } catch (...) {
+        write_console("[ERROR] (lua) Console command handling threw an unknown exception.");
     }
-    g_runtime->client_command(-1, command_line);
 }
 
 ConCommand g_lua_command(
@@ -238,10 +287,11 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         return false;
     }
     write_console("[INFO] (lua) Loaded Lua 5.5.1 native dependency from " +
-                  (dll.parent_path() / "lua55.dll").string());
+                  path_text(dll.parent_path() / "lua55.dll"));
 
     std::string game_api_error;
     if (!game_api_.initialize(root, game_api_error)) {
+        release_lua_dependency();
         const std::string message =
             "CS2 engine service initialization failed: " + game_api_error;
         write_console("[ERROR] (lua) " + message);
@@ -253,6 +303,7 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         game_api_.event_manager_vtable());
     if (!event_manager_vtable) {
         game_api_.shutdown();
+        release_lua_dependency();
         const std::string message =
             "Could not resolve the CGameEventManager virtual table required "
             "for Source 2 dynamic virtual hooks.";
@@ -278,6 +329,7 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
             },
             runtime_error)) {
         game_api_.shutdown();
+        release_lua_dependency();
         const std::string message = runtime_error.empty()
                                         ? "LuaCS initialization failed."
                                         : runtime_error;
@@ -292,6 +344,7 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         g_runtime = nullptr;
         runtime_.shutdown();
         game_api_.shutdown();
+        release_lua_dependency();
         const std::string message =
             "Could not register the server-console 'lua' command through the "
             "Source 2 convar system.";
@@ -328,77 +381,102 @@ bool LuaCSPlugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen,
         IServerGameClients, ClientCommand, g_game_clients,
         SH_MEMBER(this, &LuaCSPlugin::Hook_ClientCommand), false);
 
-    std::vector<std::string_view> failed_hooks;
-    if (load_events_hook_id_ <= 0)
-        failed_hooks.push_back("IGameEventManager2::LoadEventsFromFile capture");
-    if (fire_event_pre_hook_id_ <= 0)
-        failed_hooks.push_back("IGameEventManager2::FireEvent pre");
-    if (fire_event_post_hook_id_ <= 0)
-        failed_hooks.push_back("IGameEventManager2::FireEvent post");
-    if (game_frame_hook_id_ <= 0)
-        failed_hooks.push_back("IServerGameDLL::GameFrame");
-    if (client_active_hook_id_ <= 0)
-        failed_hooks.push_back("IServerGameClients::ClientActive");
-    if (client_disconnect_hook_id_ <= 0)
-        failed_hooks.push_back("IServerGameClients::ClientDisconnect");
-    if (client_put_in_server_hook_id_ <= 0)
-        failed_hooks.push_back("IServerGameClients::ClientPutInServer");
-    if (client_connected_hook_id_ <= 0)
-        failed_hooks.push_back("IServerGameClients::OnClientConnected");
-    if (client_command_hook_id_ <= 0)
-        failed_hooks.push_back("IServerGameClients::ClientCommand");
+    std::ostringstream failed_hooks;
+    const auto append_failed_hook = [&](const char* name, int hook_id) {
+        if (hook_id > 0) return;
+        if (failed_hooks.tellp() > 0) failed_hooks << ", ";
+        failed_hooks << name;
+    };
+    append_failed_hook("IGameEventManager2::LoadEventsFromFile",
+                       load_events_hook_id_);
+    append_failed_hook("IGameEventManager2::FireEvent(pre)",
+                       fire_event_pre_hook_id_);
+    append_failed_hook("IGameEventManager2::FireEvent(post)",
+                       fire_event_post_hook_id_);
+    append_failed_hook("IServerGameDLL::GameFrame", game_frame_hook_id_);
+    append_failed_hook("IServerGameClients::ClientActive",
+                       client_active_hook_id_);
+    append_failed_hook("IServerGameClients::ClientDisconnect",
+                       client_disconnect_hook_id_);
+    append_failed_hook("IServerGameClients::ClientPutInServer",
+                       client_put_in_server_hook_id_);
+    append_failed_hook("IServerGameClients::OnClientConnected",
+                       client_connected_hook_id_);
+    append_failed_hook("IServerGameClients::ClientCommand",
+                       client_command_hook_id_);
 
-    if (!failed_hooks.empty()) {
+    const std::string failed_hook_text = failed_hooks.str();
+    if (!failed_hook_text.empty()) {
         remove_hooks();
         unregister_lua_command();
+        free_event_copies();
         g_runtime = nullptr;
         runtime_.shutdown();
         game_api_.shutdown();
-
-        std::ostringstream message;
-        message << "Could not install required Source 2 hook(s): ";
-        for (std::size_t index = 0; index < failed_hooks.size(); ++index) {
-            if (index != 0) message << ", ";
-            message << failed_hooks[index];
-        }
-        write_console("[ERROR] (lua) " + message.str());
-        copy_error(error, maxlen, message.str());
+        release_lua_dependency();
+        const std::string message =
+            "Could not install required Source 2 hook(s): " +
+            failed_hook_text;
+        write_console("[ERROR] (lua) " + message);
+        copy_error(error, maxlen, message);
         return false;
     }
 
-    g_SMAPI->AddListener(this, this);
     write_console("[INFO] (lua) Installed all 9 required Source 2 hooks.");
-    runtime_.load_plugins();
-    write_console("[INFO] (lua) LuaCS startup completed successfully.");
+    if (late) {
+        write_console("[INFO] (lua) LuaCS was loaded late; current players "
+                      "will be discovered by subsequent Source 2 callbacks.");
+    }
+
+    try {
+        runtime_.load_plugins();
+    } catch (const std::exception& exception) {
+        const std::string message =
+            "Plugin discovery/loading threw: " + std::string(exception.what());
+        write_console("[ERROR] (lua) " + message);
+        remove_hooks();
+        unregister_lua_command();
+        free_event_copies();
+        g_runtime = nullptr;
+        runtime_.shutdown();
+        game_api_.shutdown();
+        release_lua_dependency();
+        copy_error(error, maxlen, message);
+        return false;
+    } catch (...) {
+        const std::string message =
+            "Plugin discovery/loading threw an unknown C++ exception.";
+        write_console("[ERROR] (lua) " + message);
+        remove_hooks();
+        unregister_lua_command();
+        free_event_copies();
+        g_runtime = nullptr;
+        runtime_.shutdown();
+        game_api_.shutdown();
+        release_lua_dependency();
+        copy_error(error, maxlen, message);
+        return false;
+    }
     return true;
 }
 
-bool LuaCSPlugin::Unload(char*, size_t) {
+bool LuaCSPlugin::Unload(char* error, size_t maxlen) {
+    (void)error;
+    (void)maxlen;
+    write_console("[INFO] (lua) LuaCS is unloading.");
     remove_hooks();
     unregister_lua_command();
-    g_runtime = nullptr;
     free_event_copies();
+    g_runtime = nullptr;
     runtime_.shutdown();
     game_api_.shutdown();
+    release_lua_dependency();
     g_game_events = nullptr;
-    write_console("[INFO] (lua) LuaCS unloaded.");
+    g_game_clients = nullptr;
+    g_server = nullptr;
+    g_engine = nullptr;
+    g_native_error_log.clear();
     return true;
-}
-
-void LuaCSPlugin::remove_hooks() {
-    const auto remove = [](int& hook_id) {
-        if (hook_id > 0) SH_REMOVE_HOOK_ID(hook_id);
-        hook_id = -1;
-    };
-    remove(game_frame_hook_id_);
-    remove(client_active_hook_id_);
-    remove(client_disconnect_hook_id_);
-    remove(client_put_in_server_hook_id_);
-    remove(client_connected_hook_id_);
-    remove(client_command_hook_id_);
-    remove(load_events_hook_id_);
-    remove(fire_event_pre_hook_id_);
-    remove(fire_event_post_hook_id_);
 }
 
 void LuaCSPlugin::AllPluginsLoaded() {}
@@ -408,9 +486,7 @@ void LuaCSPlugin::OnLevelInit(const char* map_name, const char*, const char*,
     runtime_.level_init(map_name ? map_name : "");
 }
 
-void LuaCSPlugin::OnLevelShutdown() {
-    runtime_.level_shutdown();
-}
+void LuaCSPlugin::OnLevelShutdown() { runtime_.level_shutdown(); }
 
 void LuaCSPlugin::Hook_GameFrame(bool simulating, bool, bool) {
     if (simulating) runtime_.tick();
@@ -447,67 +523,68 @@ void LuaCSPlugin::Hook_ClientCommand(CPlayerSlot slot,
 }
 
 int LuaCSPlugin::Hook_LoadEventsFromFile(const char*, bool) {
-    auto* manager = META_IFACEPTR(IGameEventManager2);
-    if (manager) {
-        const bool first_capture = g_game_events != manager;
+    IGameEventManager2* manager = META_IFACEPTR(IGameEventManager2);
+    if (manager && manager != g_game_events) {
         g_game_events = manager;
-        game_api_.set_event_manager(manager);
-        if (first_capture) {
-            write_console(
-                "[INFO] (lua) Captured the live IGameEventManager2 instance.");
-        }
+        game_api_.set_game_event_manager(manager);
+        write_console("[INFO] (lua) Captured the live IGameEventManager2 "
+                      "instance.");
     }
     RETURN_META_VALUE(MRES_IGNORED, 0);
 }
 
 bool LuaCSPlugin::Hook_FireEvent(IGameEvent* event, bool dont_broadcast) {
-    auto* manager = META_IFACEPTR(IGameEventManager2);
-    if (manager) {
+    IGameEventManager2* manager = META_IFACEPTR(IGameEventManager2);
+    if (manager && manager != g_game_events) {
         g_game_events = manager;
-        game_api_.set_event_manager(manager);
+        game_api_.set_game_event_manager(manager);
+    }
+
+    IGameEvent* copy = manager && event ? manager->DuplicateEvent(event) : nullptr;
+    if (event_copy_overflow_depth_ != 0) {
+        ++event_copy_overflow_depth_;
+        if (copy && manager) manager->FreeEvent(copy);
+        copy = nullptr;
+    } else if (event_copy_count_ < event_copies_.size()) {
+        event_copies_[event_copy_count_++] = copy;
     } else {
-        manager = g_game_events;
+        event_copy_overflow_depth_ = 1;
+        if (copy && manager) manager->FreeEvent(copy);
+        copy = nullptr;
+        write_console("[ERROR] (lua) Game-event nesting exceeded the bounded "
+                      "LuaCS event-copy stack; Lua callbacks are skipped for "
+                      "overflow events until nesting unwinds.");
     }
 
-    if (!manager || !event) {
-        event_copies_.push_back(nullptr);
-        RETURN_META_VALUE(MRES_IGNORED, true);
-    }
+    if (!copy) RETURN_META_VALUE(MRES_IGNORED, true);
 
-    event_copies_.push_back(manager->DuplicateEvent(event));
     const std::uint64_t token =
-        game_api_.begin_event(event, false, dont_broadcast);
-    runtime_.dispatch_game_event(token, event->GetName(), event->GetID(),
-                                 event->IsReliable(), event->IsLocal(), false,
+        game_api_.begin_event(copy, false, dont_broadcast);
+    runtime_.dispatch_game_event(token, copy->GetName(), copy->GetID(),
+                                 copy->IsReliable(), copy->IsLocal(), false,
                                  dont_broadcast);
-    const LuaCSEventDecision decision = game_api_.end_event(token);
-
+    const auto decision = game_api_.end_event(token);
     if (decision.cancelled) {
-        manager->FreeEvent(event);
+        game_api_.free_event(event);
         RETURN_META_VALUE(MRES_SUPERCEDE, false);
     }
     if (decision.dont_broadcast != dont_broadcast) {
-        RETURN_META_VALUE_NEWPARAMS(
-            MRES_IGNORED, true, &IGameEventManager2::FireEvent,
-            (event, decision.dont_broadcast));
+        RETURN_META_VALUE_NEWPARAMS(MRES_HANDLED, true,
+                                    &IGameEventManager2::FireEvent,
+                                    (event, decision.dont_broadcast));
     }
     RETURN_META_VALUE(MRES_IGNORED, true);
 }
 
 bool LuaCSPlugin::Hook_FireEventPost(IGameEvent*, bool dont_broadcast) {
-    auto* live_manager = META_IFACEPTR(IGameEventManager2);
-    if (live_manager) {
-        g_game_events = live_manager;
-        game_api_.set_event_manager(live_manager);
+    if (event_copy_overflow_depth_ != 0) {
+        --event_copy_overflow_depth_;
+        RETURN_META_VALUE(MRES_IGNORED, true);
     }
+    if (event_copy_count_ == 0) RETURN_META_VALUE(MRES_IGNORED, true);
 
-    IGameEvent* copy = nullptr;
-    if (!event_copies_.empty()) {
-        copy = event_copies_.back();
-        event_copies_.pop_back();
-    }
-
-    auto* manager = game_api_.event_manager();
+    IGameEvent* copy = event_copies_[--event_copy_count_];
+    event_copies_[event_copy_count_] = nullptr;
     if (copy) {
         const std::uint64_t token =
             game_api_.begin_event(copy, true, dont_broadcast);
@@ -515,17 +592,61 @@ bool LuaCSPlugin::Hook_FireEventPost(IGameEvent*, bool dont_broadcast) {
                                      copy->IsReliable(), copy->IsLocal(), true,
                                      dont_broadcast);
         game_api_.end_event(token);
-        if (manager) manager->FreeEvent(copy);
+        game_api_.free_event(copy);
     }
     RETURN_META_VALUE(MRES_IGNORED, true);
 }
 
+void LuaCSPlugin::remove_hooks() {
+    if (game_frame_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(game_frame_hook_id_);
+        game_frame_hook_id_ = -1;
+    }
+    if (client_active_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(client_active_hook_id_);
+        client_active_hook_id_ = -1;
+    }
+    if (client_disconnect_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(client_disconnect_hook_id_);
+        client_disconnect_hook_id_ = -1;
+    }
+    if (client_put_in_server_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(client_put_in_server_hook_id_);
+        client_put_in_server_hook_id_ = -1;
+    }
+    if (client_connected_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(client_connected_hook_id_);
+        client_connected_hook_id_ = -1;
+    }
+    if (client_command_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(client_command_hook_id_);
+        client_command_hook_id_ = -1;
+    }
+    if (load_events_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(load_events_hook_id_);
+        load_events_hook_id_ = -1;
+    }
+    if (fire_event_pre_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(fire_event_pre_hook_id_);
+        fire_event_pre_hook_id_ = -1;
+    }
+    if (fire_event_post_hook_id_ > 0) {
+        SH_REMOVE_HOOK_ID(fire_event_post_hook_id_);
+        fire_event_post_hook_id_ = -1;
+    }
+}
+
 void LuaCSPlugin::free_event_copies() {
-    auto* manager = game_api_.event_manager();
-    if (manager) {
-        for (IGameEvent* event : event_copies_) {
-            if (event) manager->FreeEvent(event);
+    if (g_game_events) {
+        while (event_copy_count_ != 0) {
+            IGameEvent* copy = event_copies_[--event_copy_count_];
+            event_copies_[event_copy_count_] = nullptr;
+            if (copy) g_game_events->FreeEvent(copy);
+        }
+    } else {
+        while (event_copy_count_ != 0) {
+            event_copies_[--event_copy_count_] = nullptr;
         }
     }
-    event_copies_.clear();
+    event_copy_overflow_depth_ = 0;
 }
