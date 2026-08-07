@@ -47,12 +47,14 @@ $root = (Resolve-Path "$PSScriptRoot\..").Path
 $utf8Runner = Join-Path $PSScriptRoot "invoke-utf8.ps1"
 $tests = @(
     "compiler-smoke.ps1",
+    "compiler-hardening-smoke.ps1",
     "generated-source-smoke.ps1",
     "logging-encoding-smoke.ps1",
     "chat-command-routing-smoke.ps1",
     "weapon-inventory-smoke.ps1",
     "schema-properties-smoke.ps1",
     "traces-grenades-smoke.ps1",
+    "patch-hardening-smoke.ps1",
     "legacy-example-cleanup-smoke.ps1",
     "deploy-smoke.ps1"
 )
@@ -122,9 +124,10 @@ foreach ($test in $tests) {
 
 Write-Host ""
 Write-Host (
-    "All LuaCS smoke suites passed: compiler/package integrity, generated " +
-    "signature scanner diagnostics, UTF-8 output, current-session error " +
-    "logging, safe spawn readiness, Source 2 player_chat command routing, " +
-    "safe weapon inventory removal and slot classification, verified schema " +
-    "property reflection/type safety, complete trace/grenade safety and Lua " +
-    "APIs, stale example cleanup, build stamps, and deployment failure paths.")
+    "All LuaCS smoke suites passed: compiler/package integrity and non-syntax " +
+    "failure diagnostics, generated signature scanner safety, UTF-8 output, " +
+    "current-session error logging, safe spawn readiness, Source 2 player_chat " +
+    "command routing, safe weapon inventory removal and slot classification, " +
+    "verified schema reflection/type safety, completed trace/grenade guards, " +
+    "patch-level native/runtime/build hardening, stale example cleanup, build " +
+    "stamps, and deployment failure paths.")
