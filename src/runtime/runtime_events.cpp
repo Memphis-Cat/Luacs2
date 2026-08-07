@@ -1,14 +1,19 @@
 #include "runtime.h"
 #include "runtime_helpers.h"
 
+#include "luacs/lua_checked.h"
+
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 #include <algorithm>
 #include <cctype>
 #include <ctime>
+#include <exception>
 #include <fstream>
+#include <limits>
 #include <sstream>
+#include <string>
 #include <system_error>
 
 namespace luacs {
@@ -46,17 +51,23 @@ std::string current_clock() {
     const auto time_value =
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm local{};
-    localtime_s(&local, &time_value);
+    if (localtime_s(&local, &time_value) != 0) return "00:00:00";
 
     char buffer[16]{};
-    std::strftime(buffer, sizeof(buffer), "%H:%M:%S", &local);
+    if (std::strftime(buffer, sizeof(buffer), "%H:%M:%S", &local) == 0) {
+        return "00:00:00";
+    }
     return buffer;
+}
+
+std::string path_text(const std::filesystem::path& path) {
+    const auto utf8 = path.u8string();
+    return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
 }
 
 std::string format_log_line(std::string_view level, std::string_view source,
                             std::string_view message) {
     std::string line;
-    line.reserve(32 + source.size() + message.size());
     line += current_clock();
     line += " [";
     line += level;
@@ -69,8 +80,14 @@ std::string format_log_line(std::string_view level, std::string_view source,
 
 void append_line(const std::filesystem::path& path, std::string_view line) {
     if (path.empty()) return;
-    std::ofstream output(path, std::ios::app);
-    if (output) output << line << '\n';
+    std::ofstream output(path, std::ios::app | std::ios::binary);
+    if (!output) return;
+    output.write(line.data(), static_cast<std::streamsize>(
+                                  std::min<std::size_t>(
+                                      line.size(),
+                                      static_cast<std::size_t>(
+                                          std::numeric_limits<std::streamsize>::max()))));
+    output.put('\n');
 }
 
 std::pair<std::string, std::string> split_first(std::string_view text) {
@@ -97,10 +114,11 @@ std::string clean_plugin_target(std::string_view target) {
          (value.front() == '\'' && value.back() == '\''))) {
         value = value.substr(1, value.size() - 2);
     }
-    const std::filesystem::path path(value);
-    const std::string extension = lowercase_ascii(path.extension().string());
-    if (extension == ".lua" || extension == ".smg") {
-        value = path.stem().string();
+    const auto separator = value.find_last_of("/\\");
+    if (separator != std::string::npos) value.erase(0, separator + 1);
+    const std::string lowered = lowercase_ascii(value);
+    if (lowered.ends_with(".lua") || lowered.ends_with(".smg")) {
+        value.resize(value.size() - 4);
     }
     return trim(value);
 }
@@ -115,10 +133,12 @@ std::string single_line(std::string_view text) {
     return result;
 }
 
+bool valid_slot(int slot) { return slot >= 0 && slot < 64; }
+
 } // namespace
 
 void Runtime::level_init(std::string_view map_name) {
-    log_runtime("Map started: " + std::string(map_name));
+    log_runtime("Map started: " + single_line(map_name));
     emit("map_start", [&](lua_State* state) {
         lua_newtable(state);
         push_string_field(state, "map", map_name);
@@ -133,12 +153,17 @@ void Runtime::level_shutdown() {
 void Runtime::player_connected(int slot, std::string_view name,
                                std::uint64_t steam64,
                                std::string_view steam_id, bool fake) {
+    if (!valid_slot(slot)) {
+        log_runtime("[WARN] Ignored player_connect with invalid slot " +
+                    std::to_string(slot) + ".");
+        return;
+    }
     auto& player = players_[slot];
     player.slot = slot;
-    player.name = name;
+    player.name = single_line(name);
     player.steam64 = steam64;
-    player.steam_id =
-        steam_id.empty() ? steam2_from_steam64(steam64) : std::string(steam_id);
+    player.steam_id = steam_id.empty() ? steam2_from_steam64(steam64)
+                                        : single_line(steam_id);
     player.fake = fake;
     player.connected = true;
     log_runtime("Player connected: " + player.name + " (slot " +
@@ -148,9 +173,14 @@ void Runtime::player_connected(int slot, std::string_view name,
 
 void Runtime::player_active(int slot, std::string_view name,
                             std::uint64_t steam64) {
+    if (!valid_slot(slot)) {
+        log_runtime("[WARN] Ignored player_activate with invalid slot " +
+                    std::to_string(slot) + ".");
+        return;
+    }
     auto& player = players_[slot];
     player.slot = slot;
-    if (!name.empty()) player.name = name;
+    if (!name.empty()) player.name = single_line(name);
     if (steam64) player.steam64 = steam64;
     if (player.steam_id.empty()) {
         player.steam_id = steam2_from_steam64(player.steam64);
@@ -162,9 +192,14 @@ void Runtime::player_active(int slot, std::string_view name,
 
 void Runtime::player_put_in_server(int slot, std::string_view name,
                                    std::uint64_t steam64) {
+    if (!valid_slot(slot)) {
+        log_runtime("[WARN] Ignored player_put_in_server with invalid slot " +
+                    std::to_string(slot) + ".");
+        return;
+    }
     auto& player = players_[slot];
     player.slot = slot;
-    if (!name.empty()) player.name = name;
+    if (!name.empty()) player.name = single_line(name);
     if (steam64) player.steam64 = steam64;
     if (player.steam_id.empty()) {
         player.steam_id = steam2_from_steam64(player.steam64);
@@ -176,14 +211,19 @@ void Runtime::player_put_in_server(int slot, std::string_view name,
 void Runtime::player_disconnected(int slot, std::string_view name,
                                   std::uint64_t steam64,
                                   std::string_view steam_id) {
+    if (!valid_slot(slot)) {
+        log_runtime("[WARN] Ignored player_disconnect with invalid slot " +
+                    std::to_string(slot) + ".");
+        return;
+    }
     PlayerSnapshot player;
     if (const auto found = players_.find(slot); found != players_.end()) {
         player = found->second;
     }
     player.slot = slot;
-    if (!name.empty()) player.name = name;
+    if (!name.empty()) player.name = single_line(name);
     if (steam64) player.steam64 = steam64;
-    if (!steam_id.empty()) player.steam_id = steam_id;
+    if (!steam_id.empty()) player.steam_id = single_line(steam_id);
     player.connected = false;
     player.active = false;
     emit_player("player_disconnect", player);
@@ -196,31 +236,35 @@ void Runtime::client_command(int slot, std::string_view command_line) {
     auto [name, arguments] = parse_command(command_line);
 
     if (slot < 0 && name == "lua") {
-        const auto package_paths = [&]() {
-            std::vector<std::filesystem::path> paths;
-            std::error_code error;
-            for (std::filesystem::directory_iterator iterator(plugins_dir_, error),
-                 end;
-                 iterator != end && !error; iterator.increment(error)) {
-                if (!iterator->is_regular_file(error)) continue;
-                if (lowercase_ascii(iterator->path().extension().string()) ==
-                    ".smg") {
-                    paths.push_back(iterator->path());
-                }
+        std::vector<std::filesystem::path> package_paths;
+        std::error_code iterator_error;
+        std::filesystem::directory_iterator iterator(plugins_dir_, iterator_error);
+        const std::filesystem::directory_iterator end;
+        for (; iterator != end && !iterator_error;
+             iterator.increment(iterator_error)) {
+            std::error_code entry_error;
+            if (!iterator->is_regular_file(entry_error) || entry_error) continue;
+            if (lowercase_ascii(path_text(iterator->path().extension())) ==
+                ".smg") {
+                package_paths.push_back(iterator->path());
             }
-            std::sort(paths.begin(), paths.end(),
-                      [](const auto& left, const auto& right) {
-                          return lowercase_ascii(left.filename().string()) <
-                                 lowercase_ascii(right.filename().string());
-                      });
-            return paths;
-        }();
+        }
+        if (iterator_error) {
+            log_runtime("[ERROR] Could not enumerate plugin packages: " +
+                        iterator_error.message());
+            return;
+        }
+        std::sort(package_paths.begin(), package_paths.end(),
+                  [](const auto& left, const auto& right) {
+                      return lowercase_ascii(path_text(left.filename())) <
+                             lowercase_ascii(path_text(right.filename()));
+                  });
 
         const auto loaded_for_key = [&](std::string_view key) {
             return std::find_if(
                 scripts_.begin(), scripts_.end(),
                 [&](const std::unique_ptr<ScriptVm>& vm) {
-                    return normalize_name(vm->source_path.stem().string()) == key;
+                    return normalize_name(path_text(vm->source_path.stem())) == key;
                 });
         };
 
@@ -228,7 +272,7 @@ void Runtime::client_command(int slot, std::string_view command_line) {
             return std::find_if(
                 package_paths.begin(), package_paths.end(),
                 [&](const std::filesystem::path& path) {
-                    return normalize_name(path.stem().string()) == key;
+                    return normalize_name(path_text(path.stem())) == key;
                 });
         };
 
@@ -255,13 +299,13 @@ void Runtime::client_command(int slot, std::string_view command_line) {
 
             for (const auto& vm : scripts_) {
                 const std::string key =
-                    normalize_name(vm->source_path.stem().string());
+                    normalize_name(path_text(vm->source_path.stem()));
                 if (query == key || query == normalize_name(vm->name)) {
                     add(key, vm->source_path);
                 }
             }
             for (const auto& path : package_paths) {
-                const std::string key = normalize_name(path.stem().string());
+                const std::string key = normalize_name(path_text(path.stem()));
                 if (query == key) add(key, path);
             }
             for (const auto& [key, metadata] : plugin_metadata_cache_) {
@@ -279,15 +323,15 @@ void Runtime::client_command(int slot, std::string_view command_line) {
             [&](std::string_view target, const std::vector<Candidate>& matches) {
                 if (matches.empty()) {
                     log_runtime("[ERROR] Plugin was not found: " +
-                                std::string(target));
+                                single_line(target));
                     return;
                 }
                 std::ostringstream message;
-                message << "[ERROR] Plugin name is ambiguous: " << target
-                        << ". Matches: ";
+                message << "[ERROR] Plugin name is ambiguous: "
+                        << single_line(target) << ". Matches: ";
                 for (std::size_t index = 0; index < matches.size(); ++index) {
                     if (index != 0) message << ", ";
-                    message << matches[index].path.filename().string();
+                    message << path_text(matches[index].path.filename());
                 }
                 log_runtime(message.str());
             };
@@ -365,10 +409,10 @@ void Runtime::client_command(int slot, std::string_view command_line) {
                 }
             };
             for (const auto& path : package_paths) {
-                add(normalize_name(path.stem().string()));
+                add(normalize_name(path_text(path.stem())));
             }
             for (const auto& vm : scripts_) {
-                add(normalize_name(vm->source_path.stem().string()));
+                add(normalize_name(path_text(vm->source_path.stem())));
             }
             for (const auto& [key, metadata] : plugin_metadata_cache_) {
                 (void)metadata;
@@ -401,8 +445,8 @@ void Runtime::client_command(int slot, std::string_view command_line) {
             }
 
             const std::string filename =
-                vm ? vm->source_path.filename().string()
-                   : package_exists ? package->filename().string()
+                vm ? path_text(vm->source_path.filename())
+                   : package_exists ? path_text(package->filename())
                                     : std::string(key) + ".smg";
             log_runtime("Plugin: " + single_line(metadata.name));
             log_runtime("  File: " + filename + " (source alias: " +
@@ -460,7 +504,7 @@ void Runtime::client_command(int slot, std::string_view command_line) {
                             " <file.lua|file.smg|plugin name>");
             } else {
                 log_runtime("[ERROR] Unknown plugin help topic: " +
-                            std::string(command));
+                            single_line(command));
             }
         };
 
@@ -486,7 +530,14 @@ void Runtime::client_command(int slot, std::string_view command_line) {
         }
         if (section == "clear") {
             if (server_command_) {
-                server_command_("clear");
+                try {
+                    server_command_("clear");
+                } catch (const std::exception& exception) {
+                    log_runtime("[ERROR] Server-command callback threw: " +
+                                std::string(exception.what()));
+                } catch (...) {
+                    log_runtime("[ERROR] Server-command callback threw an unknown exception.");
+                }
             } else {
                 log_runtime("[ERROR] CS2 server-command service is unavailable.");
             }
@@ -532,10 +583,10 @@ void Runtime::client_command(int slot, std::string_view command_line) {
                     status = "missing";
                 }
                 const std::string filename =
-                    vm ? vm->source_path.filename().string()
+                    vm ? path_text(vm->source_path.filename())
                        : package == package_paths.end()
                              ? key + ".smg"
-                             : package->filename().string();
+                             : path_text(package->filename());
                 log_runtime("  [" + status + "] " + filename + " | " +
                             single_line(metadata.name) + " v" +
                             single_line(metadata.version) + " | by " +
@@ -571,9 +622,8 @@ void Runtime::client_command(int slot, std::string_view command_line) {
             }
             std::vector<std::string> failed_keys;
             failed_keys.reserve(plugin_failures_.size());
-            for (const auto& [key, failure] : plugin_failures_) {
-                (void)failure;
-                failed_keys.push_back(key);
+            for (const auto& entry : plugin_failures_) {
+                failed_keys.push_back(entry.first);
             }
             std::sort(failed_keys.begin(), failed_keys.end());
             if (failed_keys.empty()) {
@@ -622,7 +672,7 @@ void Runtime::client_command(int slot, std::string_view command_line) {
         if (action == "unload" || action == "force_unload") {
             if (loaded == scripts_.end()) {
                 log_runtime("[ERROR] Plugin is not loaded: " +
-                            selected.path.filename().string());
+                            path_text(selected.path.filename()));
                 return;
             }
             unload_key(selected.key, action == "force_unload");
@@ -633,19 +683,19 @@ void Runtime::client_command(int slot, std::string_view command_line) {
         if (!std::filesystem::is_regular_file(selected.path, file_error) ||
             file_error) {
             log_runtime("[ERROR] Compiled plugin package does not exist: " +
-                        selected.path.string());
+                        path_text(selected.path));
             return;
         }
 
         if (action == "load") {
             if (loaded != scripts_.end()) {
                 log_runtime("[ERROR] Plugin is already loaded: " +
-                            selected.path.filename().string());
+                            path_text(selected.path.filename()));
                 return;
             }
             if (load_plugin(selected.path)) {
                 log_runtime("Loaded plugin package " +
-                            selected.path.filename().string() + ".");
+                            path_text(selected.path.filename()) + ".");
             }
             return;
         }
@@ -655,12 +705,17 @@ void Runtime::client_command(int slot, std::string_view command_line) {
         if (load_plugin(selected.path)) {
             log_runtime(std::string(action == "refresh" ? "Refreshed plugin "
                                                         : "Force-loaded plugin ") +
-                        selected.path.filename().string() + ".");
+                        path_text(selected.path.filename()) + ".");
         }
         return;
     }
 
-    const PlayerSnapshot* player = player_snapshot(slot);
+    if (slot >= 0 && !valid_slot(slot)) {
+        log_runtime("[WARN] Ignored client command from invalid slot " +
+                    std::to_string(slot) + ".");
+        return;
+    }
+    const PlayerSnapshot* player = slot >= 0 ? player_snapshot(slot) : nullptr;
 
     emit("client_command", [&](lua_State* state) {
         lua_newtable(state);
@@ -685,16 +740,36 @@ void Runtime::dispatch_game_event(std::uint64_t token, std::string_view name,
         const auto found = vm.events.find(key);
         if (found == vm.events.end()) continue;
 
-        const auto callbacks = found->second;
+        std::vector<EventCallback> callbacks;
+        try {
+            callbacks = found->second;
+        } catch (const std::exception& exception) {
+            log(vm, "[ERROR] Could not snapshot event callbacks: " +
+                        std::string(exception.what()));
+            continue;
+        } catch (...) {
+            log(vm, "[ERROR] Could not snapshot event callbacks due to an unknown exception.");
+            continue;
+        }
+
         for (const auto& callback : callbacks) {
             if (callback.post != post) continue;
 
             lua_rawgeti(vm.state, LUA_REGISTRYINDEX, callback.reference);
             if (callback.mode == EventCallbackMode::PlayerOnly) {
                 int player_slot = -1;
-                if (host_operations_.event_get_player_slot &&
-                    host_operations_.event_get_player_slot(token, "userid",
-                                                           player_slot)) {
+                bool resolved = false;
+                try {
+                    resolved = host_operations_.event_get_player_slot &&
+                               host_operations_.event_get_player_slot(
+                                   token, "userid", player_slot);
+                } catch (const std::exception& exception) {
+                    log(vm, "[ERROR] Player event resolution threw: " +
+                                std::string(exception.what()));
+                } catch (...) {
+                    log(vm, "[ERROR] Player event resolution threw an unknown exception.");
+                }
+                if (resolved && valid_slot(player_slot)) {
                     if (const auto* player = player_snapshot(player_slot)) {
                         push_player(vm.state, *player);
                     } else {
@@ -705,8 +780,7 @@ void Runtime::dispatch_game_event(std::uint64_t token, std::string_view name,
                 }
             } else {
                 lua_createtable(vm.state, 0, 9);
-                lua_pushinteger(vm.state,
-                                static_cast<lua_Integer>(token));
+                lua_checked::push_u64_exact(vm.state, token);
                 lua_setfield(vm.state, -2, "__token");
                 push_string_field(vm.state, "name", name);
                 push_integer_field(vm.state, "id", id);
@@ -741,15 +815,39 @@ void Runtime::emit(
     std::string_view event_name,
     const std::function<void(lua_State*)>& push_event_table) {
     const std::string key = normalize_name(event_name);
+    if (key.empty()) return;
     for (auto& vm_ptr : scripts_) {
         auto& vm = *vm_ptr;
         const auto found = vm.events.find(key);
         if (found == vm.events.end()) continue;
-        const auto callbacks = found->second;
+
+        std::vector<EventCallback> callbacks;
+        try {
+            callbacks = found->second;
+        } catch (const std::exception& exception) {
+            log(vm, "[ERROR] Could not snapshot lifecycle callbacks: " +
+                        std::string(exception.what()));
+            continue;
+        } catch (...) {
+            log(vm, "[ERROR] Could not snapshot lifecycle callbacks due to an unknown exception.");
+            continue;
+        }
+
         for (const auto& callback : callbacks) {
             if (callback.post) continue;
             lua_rawgeti(vm.state, LUA_REGISTRYINDEX, callback.reference);
-            push_event_table(vm.state);
+            try {
+                push_event_table(vm.state);
+            } catch (const std::exception& exception) {
+                lua_pop(vm.state, 1);
+                log(vm, "[ERROR] Event payload builder threw: " +
+                            std::string(exception.what()));
+                continue;
+            } catch (...) {
+                lua_pop(vm.state, 1);
+                log(vm, "[ERROR] Event payload builder threw an unknown exception.");
+                continue;
+            }
             if (callback.mode == EventCallbackMode::PlayerOnly) {
                 lua_getfield(vm.state, -1, "player");
                 lua_remove(vm.state, -2);
@@ -773,11 +871,24 @@ void Runtime::dispatch_command(const PlayerSnapshot* player,
                                std::string_view arguments,
                                std::string_view raw) {
     const std::string key = normalize_name(name);
+    if (key.empty()) return;
     for (auto& vm_ptr : scripts_) {
         auto& vm = *vm_ptr;
         const auto found = vm.commands.find(key);
         if (found == vm.commands.end()) continue;
-        const auto callbacks = found->second;
+
+        std::vector<int> callbacks;
+        try {
+            callbacks = found->second;
+        } catch (const std::exception& exception) {
+            log(vm, "[ERROR] Could not snapshot command callbacks: " +
+                        std::string(exception.what()));
+            continue;
+        } catch (...) {
+            log(vm, "[ERROR] Could not snapshot command callbacks due to an unknown exception.");
+            continue;
+        }
+
         for (int reference : callbacks) {
             lua_rawgeti(vm.state, LUA_REGISTRYINDEX, reference);
             if (player) {
@@ -793,36 +904,59 @@ void Runtime::dispatch_command(const PlayerSnapshot* player,
 }
 
 void Runtime::log(ScriptVm& vm, std::string_view text) {
-    const auto parsed = parse_level(text);
-    const auto plugin_line =
-        format_log_line(parsed.level, vm.name, parsed.message);
-    const auto console_line =
-        format_log_line(parsed.level, "lua:" + vm.name, parsed.message);
+    try {
+        const auto parsed = parse_level(text);
+        const auto plugin_line =
+            format_log_line(parsed.level, vm.name, parsed.message);
+        const auto console_line =
+            format_log_line(parsed.level, "lua:" + vm.name, parsed.message);
 
-    append_line(vm.log_path, plugin_line);
-    append_line(core_log_path_, console_line);
-    if (console_writer_) console_writer_(console_line);
+        append_line(vm.log_path, plugin_line);
+        append_line(core_log_path_, console_line);
+        if (console_writer_) {
+            try {
+                console_writer_(console_line);
+            } catch (...) {
+                // Logging must never let a host console callback unwind into Lua.
+            }
+        }
+    } catch (...) {
+        // Logging is a diagnostic side effect. Never make a plugin crash because
+        // formatting/allocation of a log record failed.
+    }
 }
 
 void Runtime::log_runtime(std::string_view text) {
-    const auto parsed = parse_level(text);
-    const auto line = format_log_line(parsed.level, "lua", parsed.message);
-    append_line(core_log_path_, line);
-    if (console_writer_) console_writer_(line);
+    try {
+        const auto parsed = parse_level(text);
+        const auto line = format_log_line(parsed.level, "lua", parsed.message);
+        append_line(core_log_path_, line);
+        if (console_writer_) {
+            try {
+                console_writer_(line);
+            } catch (...) {
+                // Runtime diagnostics cannot safely propagate host exceptions.
+            }
+        }
+    } catch (...) {
+    }
 }
 
 std::filesystem::path Runtime::create_log_path() const {
     const auto now_time =
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm local{};
-    localtime_s(&local, &now_time);
+    if (localtime_s(&local, &now_time) != 0) local = {};
     for (std::uint32_t index = 1; index < 1000000; ++index) {
         std::ostringstream name;
         name << local.tm_mday << (local.tm_mon + 1) << (local.tm_year + 1900)
              << local.tm_hour << local.tm_min << local.tm_sec << index
              << ".log";
-        auto path = logs_dir_ / name.str();
-        if (!std::filesystem::exists(path)) return path;
+        const auto path = logs_dir_ / name.str();
+        std::error_code exists_error;
+        const bool exists = std::filesystem::exists(path, exists_error);
+        if (exists_error) return {};
+        if (!exists) return path;
     }
     return logs_dir_ / (std::to_string(now_time) + "1000000.log");
 }
