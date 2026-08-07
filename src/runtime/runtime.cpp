@@ -520,7 +520,7 @@ void Runtime::tick() {
             if (found->repeat && !found->cancelled) {
                 const double next_due = current + found->interval;
                 if (!std::isfinite(next_due)) {
-                    log(*vm, "[ERROR] Repeating timer overflowed its due time and was cancelled.");
+                    log(vm, "[ERROR] Repeating timer overflowed its due time and was cancelled.");
                     found->cancelled = true;
                 } else {
                     found->due = next_due;
