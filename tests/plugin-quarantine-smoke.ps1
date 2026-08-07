@@ -4,8 +4,9 @@ $root = (Resolve-Path "$PSScriptRoot\..").Path
 $runtimeLua = Join-Path $root "src\runtime\runtime_lua.cpp"
 $runtimeHelpers = Join-Path $root "src\runtime\runtime_helpers.h"
 $cmake = Join-Path $root "CMakeLists.txt"
+$generatedInjection = Join-Path $root "tools\inject-generated-game-api.cmake"
 
-foreach ($path in @($runtimeLua, $runtimeHelpers, $cmake)) {
+foreach ($path in @($runtimeLua, $runtimeHelpers, $cmake, $generatedInjection)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "required quarantine test source is missing: $path"
     }
@@ -14,6 +15,7 @@ foreach ($path in @($runtimeLua, $runtimeHelpers, $cmake)) {
 $luaText = [System.IO.File]::ReadAllText($runtimeLua)
 $helperText = [System.IO.File]::ReadAllText($runtimeHelpers)
 $cmakeText = [System.IO.File]::ReadAllText($cmake)
+$injectionText = [System.IO.File]::ReadAllText($generatedInjection)
 
 foreach ($token in @(
     "loaded.get() == &vm",
@@ -42,8 +44,8 @@ foreach ($token in @(
     }
 }
 
-if (-not $cmakeText.Contains("sourcehook_impl_chookmaninfo.cpp")) {
-    throw "CMake lost required SourceHook sourcehook_impl_chookmaninfo.cpp"
+if (-not $injectionText.Contains("sourcehook_impl_chookmaninfo.cpp")) {
+    throw "generated-source injection lost required sourcehook_impl_chookmaninfo.cpp"
 }
 if (-not $cmakeText.Contains("/WX")) {
     throw "CMake no longer treats MSVC warnings as errors"
