@@ -55,6 +55,7 @@ $tests = @(
     "schema-properties-smoke.ps1",
     "traces-grenades-smoke.ps1",
     "patch-hardening-smoke.ps1",
+    "plugin-quarantine-smoke.ps1",
     "legacy-example-cleanup-smoke.ps1",
     "deploy-smoke.ps1"
 )
@@ -129,5 +130,5 @@ Write-Host (
     "current-session error logging, safe spawn readiness, Source 2 player_chat " +
     "command routing, safe weapon inventory removal and slot classification, " +
     "verified schema reflection/type safety, completed trace/grenade guards, " +
-    "patch-level native/runtime/build hardening, stale example cleanup, build " +
-    "stamps, and deployment failure paths.")
+    "uncaught-plugin callback quarantine, patch-level native/runtime/build " +
+    "hardening, stale example cleanup, build stamps, and deployment failure paths.")
