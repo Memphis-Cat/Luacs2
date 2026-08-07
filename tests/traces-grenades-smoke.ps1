@@ -38,6 +38,11 @@ function Assert-NotContains {
     }
 }
 
+function Normalize-Whitespace {
+    param([Parameter(Mandatory = $true)][string]$Text)
+    return [regex]::Replace($Text, '\s+', ' ').Trim()
+}
+
 foreach ($requiredFile in @(
     $traceSource,
     $traceVerified,
@@ -185,7 +190,7 @@ Assert-Contains $abiText @(
     'enum class GrenadeType'
 ) "AdvancedWorld ABI"
 
-$traceDocsText = [System.IO.File]::ReadAllText($traceDocs)
+$traceDocsText = Normalize-Whitespace ([System.IO.File]::ReadAllText($traceDocs))
 Assert-Contains $traceDocsText @(
     '# LuaCS traces',
     '## Exact 64-bit masks and pointers',
@@ -197,7 +202,7 @@ Assert-Contains $traceDocsText @(
     '`hit_entity` and `hit_world` are boolean fields.'
 ) "trace documentation"
 
-$grenadeDocsText = [System.IO.File]::ReadAllText($grenadeDocs)
+$grenadeDocsText = Normalize-Whitespace ([System.IO.File]::ReadAllText($grenadeDocs))
 Assert-Contains $grenadeDocsText @(
     '# LuaCS grenades',
     '## Supported types',
