@@ -13,7 +13,6 @@ extern "C" {
 #include <limits>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace {
 
@@ -38,6 +37,14 @@ int fail(lua_State* state, const char* error) {
     return 2;
 }
 
+int checked_entity_index(lua_State* state, int argument, lua_Integer value) {
+    if (value < 0 || value > std::numeric_limits<int>::max()) {
+        return luaL_argerror(state, argument,
+                             "entity index must be between 0 and INT_MAX");
+    }
+    return static_cast<int>(value);
+}
+
 bool integer_field(lua_State* state, int table, const char* field,
                    lua_Integer& value) {
     table = lua_absindex(state, table);
@@ -53,19 +60,19 @@ bool integer_field(lua_State* state, int table, const char* field,
 
 int entity_index_from(lua_State* state, int index) {
     if (lua_isinteger(state, index)) {
-        return static_cast<int>(lua_tointeger(state, index));
+        return checked_entity_index(state, index, lua_tointeger(state, index));
     }
     luaL_checktype(state, index, LUA_TTABLE);
 
     lua_Integer value{};
     if (integer_field(state, index, "entity_index", value)) {
-        return static_cast<int>(value);
+        return checked_entity_index(state, index, value);
     }
     if (integer_field(state, index, "pawn_index", value) && value >= 0) {
-        return static_cast<int>(value);
+        return checked_entity_index(state, index, value);
     }
     if (integer_field(state, index, "controller_index", value)) {
-        return static_cast<int>(value);
+        return checked_entity_index(state, index, value);
     }
     return luaL_argerror(
         state, index,
@@ -83,26 +90,10 @@ int optional_array_index(lua_State* state, int index) {
     return static_cast<int>(value);
 }
 
-bool optional_network(lua_State* state, int index) {
-    return lua_isnoneornil(state, index) || lua_toboolean(state, index) != 0;
-}
-
-std::string indexed_path(lua_State* state, int argument,
-                         std::string_view path, int index) {
-    if (index < 0) return std::string(path);
-    const std::size_t segment = path.rfind('.');
-    const std::size_t bracket = path.find(
-        '[', segment == std::string_view::npos ? 0 : segment + 1);
-    if (bracket != std::string_view::npos) {
-        luaL_argerror(state, argument,
-                      "final property segment already contains an array index");
-        return {};
-    }
-    std::string result(path);
-    result.push_back('[');
-    result += std::to_string(index);
-    result.push_back(']');
-    return result;
+bool optional_boolean(lua_State* state, int index, bool default_value = true) {
+    if (lua_isnoneornil(state, index)) return default_value;
+    luaL_checktype(state, index, LUA_TBOOLEAN);
+    return lua_toboolean(state, index) != 0;
 }
 
 void push_vector(lua_State* state, const Vector3& value,
@@ -229,6 +220,51 @@ void push_info(lua_State* state, const PropertyInfo& value) {
     apply_info(state, -1, value);
 }
 
+void push_uint64_exact(lua_State* state, std::uint64_t value) {
+    if (value <= static_cast<std::uint64_t>(
+                     std::numeric_limits<lua_Integer>::max())) {
+        lua_pushinteger(state, static_cast<lua_Integer>(value));
+        return;
+    }
+    const std::string exact = std::to_string(value);
+    lua_pushlstring(state, exact.data(), exact.size());
+}
+
+std::uint64_t read_uint64_exact(lua_State* state, int index,
+                                const char* label) {
+    if (lua_isinteger(state, index)) {
+        const lua_Integer value = lua_tointeger(state, index);
+        if (value < 0) {
+            luaL_argerror(state, index,
+                          "unsigned/pointer schema value cannot be negative");
+        }
+        return static_cast<std::uint64_t>(value);
+    }
+
+    std::size_t size{};
+    const char* raw = luaL_checklstring(state, index, &size);
+    if (!raw || size == 0 || raw[0] == '-') {
+        luaL_argerror(state, index,
+                      "expected a non-negative integer or exact decimal/0x string");
+    }
+    const std::string text(raw, size);
+    try {
+        std::size_t parsed{};
+        const std::uint64_t value = std::stoull(text, &parsed, 0);
+        if (parsed != text.size()) {
+            luaL_argerror(state, index,
+                          "unsigned/pointer string contains trailing characters");
+        }
+        return value;
+    } catch (...) {
+        std::string message = "invalid ";
+        message += label;
+        message += " value; expected a non-negative integer or exact decimal/0x string";
+        luaL_argerror(state, index, message.c_str());
+    }
+    return 0;
+}
+
 void push_value(lua_State* state, const PropertyValue& value) {
     switch (value.kind) {
         case PropertyKind::Boolean:
@@ -239,13 +275,7 @@ void push_value(lua_State* state, const PropertyValue& value) {
             break;
         case PropertyKind::UnsignedInteger:
         case PropertyKind::Pointer:
-            if (value.unsigned_value >
-                static_cast<std::uint64_t>(std::numeric_limits<lua_Integer>::max())) {
-                lua_pushnumber(state, static_cast<lua_Number>(value.unsigned_value));
-            } else {
-                lua_pushinteger(
-                    state, static_cast<lua_Integer>(value.unsigned_value));
-            }
+            push_uint64_exact(state, value.unsigned_value);
             break;
         case PropertyKind::Float:
             lua_pushnumber(state, value.float_value);
@@ -288,24 +318,13 @@ PropertyValue read_value(lua_State* state, int index, PropertyKind kind) {
             output.signed_value =
                 static_cast<std::int64_t>(luaL_checkinteger(state, index));
             break;
-        case PropertyKind::UnsignedInteger: {
-            const lua_Integer value = luaL_checkinteger(state, index);
-            if (value < 0) {
-                luaL_argerror(state, index,
-                              "unsigned schema value cannot be negative");
-            }
-            output.unsigned_value = static_cast<std::uint64_t>(value);
+        case PropertyKind::UnsignedInteger:
+            output.unsigned_value =
+                read_uint64_exact(state, index, "unsigned integer");
             break;
-        }
-        case PropertyKind::Pointer: {
-            const lua_Integer value = luaL_checkinteger(state, index);
-            if (value < 0) {
-                luaL_argerror(state, index,
-                              "pointer schema value cannot be negative");
-            }
-            output.unsigned_value = static_cast<std::uint64_t>(value);
+        case PropertyKind::Pointer:
+            output.unsigned_value = read_uint64_exact(state, index, "pointer");
             break;
-        }
         case PropertyKind::Float:
             output.float_value = luaL_checknumber(state, index);
             if (!std::isfinite(output.float_value)) {
@@ -334,12 +353,8 @@ PropertyValue read_value(lua_State* state, int index, PropertyKind kind) {
                 output.entity_index = -1;
                 output.entity_handle = 0xFFFFFFFFu;
             } else if (lua_isinteger(state, index)) {
-                const lua_Integer entity = lua_tointeger(state, index);
-                if (entity < 0 || entity > std::numeric_limits<int>::max()) {
-                    luaL_argerror(state, index,
-                                  "entity handle target index is out of range");
-                }
-                output.entity_index = static_cast<int>(entity);
+                output.entity_index = checked_entity_index(
+                    state, index, lua_tointeger(state, index));
             } else {
                 output.entity_index = entity_index_from(state, index);
             }
@@ -458,8 +473,8 @@ int get_typed(lua_State* state, PropertyKind expected, const char* label) {
     }
     if (result.kind != expected) {
         std::snprintf(error, sizeof(error),
-                      "schema property is %s, not %s",
-                      kind_name(result.kind), label);
+                      "schema property is %s, not %s", kind_name(result.kind),
+                      label);
         return fail(state, error);
     }
     push_value(state, result);
@@ -495,13 +510,12 @@ int get_pointer(lua_State* state) {
     return get_typed(state, PropertyKind::Pointer, "pointer");
 }
 
-int set_common(lua_State* state, PropertyKind forced_kind,
-               bool force_kind) {
+int set_common(lua_State* state, PropertyKind forced_kind, bool force_kind) {
     const auto* api = advanced();
     const int entity = entity_index_from(state, 1);
     const char* property = luaL_checkstring(state, 2);
     const int array_index = optional_array_index(state, 4);
-    const bool network = optional_network(state, 5);
+    const bool network = optional_boolean(state, 5);
     PropertyInfo metadata;
     char error[512]{};
     if (!fetch_info(api, entity, property, array_index, metadata, error,
@@ -510,8 +524,8 @@ int set_common(lua_State* state, PropertyKind forced_kind,
     }
     if (force_kind && metadata.kind != forced_kind) {
         std::snprintf(error, sizeof(error),
-                      "schema property is %s, not %s",
-                      kind_name(metadata.kind), kind_name(forced_kind));
+                      "schema property is %s, not %s", kind_name(metadata.kind),
+                      kind_name(forced_kind));
         return fail(state, error);
     }
     const PropertyKind value_kind = force_kind ? forced_kind : metadata.kind;
@@ -590,7 +604,7 @@ int set_raw(lua_State* state) {
                           static_cast<int>(luacs::kPropertyRawCapacity));
     }
     const int array_index = optional_array_index(state, 4);
-    const bool network = optional_network(state, 5);
+    const bool network = optional_boolean(state, 5);
     RawPropertyValue input;
     input.size = size;
     if (size) std::memcpy(input.bytes, bytes, size);
@@ -675,7 +689,7 @@ int collection_resize(lua_State* state) {
         return luaL_error(state,
                           "collection size must be between 0 and INT_MAX");
     }
-    const bool network = optional_network(state, 4);
+    const bool network = optional_boolean(state, 4);
     char error[512]{};
     if (!api || !api->property_collection_resize ||
         !api->property_collection_resize(
@@ -724,7 +738,7 @@ int values(lua_State* state) {
 int list(lua_State* state) {
     const auto* api = advanced();
     const int entity = entity_index_from(state, 1);
-    const bool inherited = optional_network(state, 2);
+    const bool inherited = optional_boolean(state, 2);
     char error[512]{};
     if (!api || !api->property_count || !api->property_at) {
         return fail(state, "property enumeration service is unavailable");
@@ -755,7 +769,7 @@ int children(lua_State* state) {
     const char* property = lua_isnoneornil(state, 2)
                                ? ""
                                : luaL_checkstring(state, 2);
-    const bool inherited = optional_network(state, 3);
+    const bool inherited = optional_boolean(state, 3);
     char error[512]{};
     if (!api || !api->property_child_count || !api->property_child_at) {
         return fail(state, "child property enumeration service is unavailable");
@@ -803,8 +817,14 @@ bool append_walk(lua_State* state, const AdvancedWorldServices* api,
         push_info(state, value);
         lua_seti(state, table, next++);
         if (depth < max_depth && (value.embedded_class || value.pointer)) {
+            std::string child_failure;
             if (!append_walk(state, api, entity, value.name, inherited,
-                             depth + 1, max_depth, table, next, failure)) {
+                             depth + 1, max_depth, table, next,
+                             child_failure)) {
+                if (child_failure == "nested schema pointer is null") {
+                    continue;
+                }
+                failure = std::move(child_failure);
                 return false;
             }
         }
@@ -815,8 +835,9 @@ bool append_walk(lua_State* state, const AdvancedWorldServices* api,
 int walk(lua_State* state) {
     const auto* api = advanced();
     const int entity = entity_index_from(state, 1);
-    const char* root = lua_isnoneornil(state, 2) ? "" : luaL_checkstring(state, 2);
-    const bool inherited = optional_network(state, 3);
+    const char* root =
+        lua_isnoneornil(state, 2) ? "" : luaL_checkstring(state, 2);
+    const bool inherited = optional_boolean(state, 3);
     const lua_Integer requested_depth = lua_isnoneornil(state, 4)
                                             ? 4
                                             : luaL_checkinteger(state, 4);
@@ -840,34 +861,41 @@ int walk(lua_State* state) {
     return 1;
 }
 
-int ref_entity(lua_State* state) {
-    lua_getfield(state, 1, "entity_index");
-    const int entity = static_cast<int>(luaL_checkinteger(state, -1));
+int ref_entity_from(lua_State* state, int table) {
+    table = lua_absindex(state, table);
+    lua_getfield(state, table, "entity_index");
+    const lua_Integer raw = luaL_checkinteger(state, -1);
     lua_pop(state, 1);
-    return entity;
+    return checked_entity_index(state, table, raw);
 }
 
-std::string ref_property(lua_State* state) {
-    lua_getfield(state, 1, "property");
+std::string ref_property_from(lua_State* state, int table) {
+    table = lua_absindex(state, table);
+    lua_getfield(state, table, "property");
     const char* value = luaL_checkstring(state, -1);
     std::string result(value);
     lua_pop(state, 1);
     return result;
 }
 
-int ref_index(lua_State* state) {
-    lua_getfield(state, 1, "array_index");
-    const int index = static_cast<int>(luaL_checkinteger(state, -1));
+int ref_index_from(lua_State* state, int table) {
+    table = lua_absindex(state, table);
+    lua_getfield(state, table, "array_index");
+    const lua_Integer raw = luaL_checkinteger(state, -1);
     lua_pop(state, 1);
-    return index;
+    if (raw < -1 || raw > std::numeric_limits<int>::max()) {
+        luaL_error(state, "property reference array index is invalid");
+    }
+    return static_cast<int>(raw);
 }
 
 bool refresh_ref_table(lua_State* state, int table, char* error,
                        std::size_t error_size) {
+    table = lua_absindex(state, table);
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    const int array_index = ref_index(state);
+    const int entity = ref_entity_from(state, table);
+    const std::string property = ref_property_from(state, table);
+    const int array_index = ref_index_from(state, table);
     PropertyInfo metadata;
     if (!fetch_info(api, entity, property, array_index, metadata, error,
                     error_size)) {
@@ -911,15 +939,16 @@ int ref_refresh(lua_State* state) {
 
 int ref_get(lua_State* state) {
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    const int array_index = ref_index(state);
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    const int array_index = ref_index_from(state, 1);
     PropertyValue result;
     char error[512]{};
     if (!api || !api->property_get ||
         !api->property_get(api->context, entity, property.c_str(), array_index,
                            &result, error, sizeof(error))) {
-        return fail(state, error[0] ? error : "property read service is unavailable");
+        return fail(state,
+                    error[0] ? error : "property read service is unavailable");
     }
     push_value(state, result);
     return 1;
@@ -927,10 +956,10 @@ int ref_get(lua_State* state) {
 
 int ref_set(lua_State* state) {
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    const int array_index = ref_index(state);
-    const bool network = optional_network(state, 3);
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    const int array_index = ref_index_from(state, 1);
+    const bool network = optional_boolean(state, 3);
     PropertyInfo metadata;
     char error[512]{};
     if (!fetch_info(api, entity, property, array_index, metadata, error,
@@ -942,7 +971,8 @@ int ref_set(lua_State* state) {
     if (!api || !api->property_set ||
         !api->property_set(api->context, entity, property.c_str(), array_index,
                            &value, network, error, sizeof(error))) {
-        return fail(state, error[0] ? error : "property write service is unavailable");
+        return fail(state,
+                    error[0] ? error : "property write service is unavailable");
     }
     lua_pushboolean(state, true);
     return 1;
@@ -950,9 +980,9 @@ int ref_set(lua_State* state) {
 
 int ref_get_raw(lua_State* state) {
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    const int array_index = ref_index(state);
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    const int array_index = ref_index_from(state, 1);
     RawPropertyValue value;
     PropertyInfo metadata;
     char error[512]{};
@@ -960,7 +990,9 @@ int ref_get_raw(lua_State* state) {
         !api->property_get_raw(api->context, entity, property.c_str(),
                                array_index, &value, &metadata, error,
                                sizeof(error))) {
-        return fail(state, error[0] ? error : "raw property read service is unavailable");
+        return fail(state,
+                    error[0] ? error
+                             : "raw property read service is unavailable");
     }
     lua_pushlstring(state, reinterpret_cast<const char*>(value.bytes),
                     value.size);
@@ -970,16 +1002,16 @@ int ref_get_raw(lua_State* state) {
 
 int ref_set_raw(lua_State* state) {
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    const int array_index = ref_index(state);
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    const int array_index = ref_index_from(state, 1);
     std::size_t size{};
     const char* bytes = luaL_checklstring(state, 2, &size);
     if (size > luacs::kPropertyRawCapacity) {
         return luaL_error(state, "raw property value exceeds %d bytes",
                           static_cast<int>(luacs::kPropertyRawCapacity));
     }
-    const bool network = optional_network(state, 3);
+    const bool network = optional_boolean(state, 3);
     RawPropertyValue value;
     value.size = size;
     if (size) std::memcpy(value.bytes, bytes, size);
@@ -988,7 +1020,9 @@ int ref_set_raw(lua_State* state) {
         !api->property_set_raw(api->context, entity, property.c_str(),
                                array_index, &value, network, error,
                                sizeof(error))) {
-        return fail(state, error[0] ? error : "raw property write service is unavailable");
+        return fail(state,
+                    error[0] ? error
+                             : "raw property write service is unavailable");
     }
     lua_pushboolean(state, true);
     return 1;
@@ -996,9 +1030,9 @@ int ref_set_raw(lua_State* state) {
 
 int ref_count(lua_State* state) {
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    if (ref_index(state) >= 0) {
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    if (ref_index_from(state, 1) >= 0) {
         return fail(state, "indexed property reference is already an element");
     }
     std::size_t total{};
@@ -1014,9 +1048,9 @@ int ref_count(lua_State* state) {
 
 int ref_values(lua_State* state) {
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    if (ref_index(state) >= 0) {
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    if (ref_index_from(state, 1) >= 0) {
         return fail(state, "indexed property reference is already an element");
     }
     std::size_t total{};
@@ -1028,6 +1062,9 @@ int ref_values(lua_State* state) {
     }
     if (!api || !api->property_get) {
         return fail(state, "property read service is unavailable");
+    }
+    if (total > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return fail(state, "schema collection is too large for a Lua table");
     }
     lua_createtable(state, static_cast<int>(total), 0);
     for (std::size_t index = 0; index < total; ++index) {
@@ -1046,9 +1083,9 @@ int ref_values(lua_State* state) {
 
 int ref_resize(lua_State* state) {
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    if (ref_index(state) >= 0) {
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    if (ref_index_from(state, 1) >= 0) {
         return fail(state, "indexed property reference is already an element");
     }
     const lua_Integer requested = luaL_checkinteger(state, 2);
@@ -1056,14 +1093,16 @@ int ref_resize(lua_State* state) {
         return luaL_argerror(state, 2,
                              "collection size must be between 0 and INT_MAX");
     }
-    const bool network = optional_network(state, 3);
+    const bool network = optional_boolean(state, 3);
     char error[512]{};
     if (!api || !api->property_collection_resize ||
         !api->property_collection_resize(
             api->context, entity, property.c_str(),
             static_cast<std::size_t>(requested), network, error,
             sizeof(error))) {
-        return fail(state, error[0] ? error : "collection resize service is unavailable");
+        return fail(state,
+                    error[0] ? error
+                             : "collection resize service is unavailable");
     }
     lua_pushboolean(state, true);
     return 1;
@@ -1071,10 +1110,10 @@ int ref_resize(lua_State* state) {
 
 int ref_children(lua_State* state) {
     const auto* api = advanced();
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    const int array_index = ref_index(state);
-    const bool inherited = optional_network(state, 2);
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    const int array_index = ref_index_from(state, 1);
+    const bool inherited = optional_boolean(state, 2);
     std::string path = property;
     if (array_index >= 0) {
         const std::size_t segment = path.rfind('.');
@@ -1095,6 +1134,9 @@ int ref_children(lua_State* state) {
     const std::size_t total = api->property_child_count(
         api->context, entity, path.c_str(), inherited, error, sizeof(error));
     if (error[0]) return fail(state, error);
+    if (total > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return fail(state, "schema child list is too large for a Lua table");
+    }
     lua_createtable(state, static_cast<int>(total), 0);
     for (std::size_t index = 0; index < total; ++index) {
         PropertyInfo value;
@@ -1111,9 +1153,9 @@ int ref_children(lua_State* state) {
 }
 
 int ref_tostring(lua_State* state) {
-    const int entity = ref_entity(state);
-    const std::string property = ref_property(state);
-    const int array_index = ref_index(state);
+    const int entity = ref_entity_from(state, 1);
+    const std::string property = ref_property_from(state, 1);
+    const int array_index = ref_index_from(state, 1);
     if (array_index >= 0) {
         lua_pushfstring(state, "PropertyRef(%d, %s[%d])", entity,
                         property.c_str(), array_index);
@@ -1159,7 +1201,8 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
         return luaL_error(state, "LuaCS properties ABI mismatch");
     }
     if (!advanced()) {
-        return luaL_error(state, "LuaCS advanced world services are unavailable");
+        return luaL_error(state,
+                          "LuaCS advanced world services are unavailable");
     }
 
     if (luaL_newmetatable(state, kPropertyRefMeta)) {
