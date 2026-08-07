@@ -49,6 +49,7 @@ $tests = @(
     "compiler-smoke.ps1",
     "generated-source-smoke.ps1",
     "logging-encoding-smoke.ps1",
+    "legacy-example-cleanup-smoke.ps1",
     "deploy-smoke.ps1"
 )
 
@@ -119,4 +120,5 @@ Write-Host ""
 Write-Host (
     "All LuaCS smoke suites passed: compiler/package integrity, generated " +
     "signature scanner diagnostics, UTF-8 output, current-session error " +
-    "logging, safe spawn readiness, build stamps, and deployment failure paths.")
+    "logging, safe spawn readiness, stale example cleanup, build stamps, " +
+    "and deployment failure paths.")
