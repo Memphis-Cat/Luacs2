@@ -14,6 +14,23 @@ function ConvertFrom-CodePoints {
     return -join ($CodePoints | ForEach-Object { [char]$_ })
 }
 
+function Assert-AsciiScript {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    for ($index = 0; $index -lt $bytes.Length; ++$index) {
+        if ($bytes[$index] -gt 0x7F) {
+            throw (
+                "PowerShell 5.1 compatibility requires ASCII-only test " +
+                "sources; '$Path' contains byte 0x{0:X2} at offset {1}" -f
+                $bytes[$index], $index)
+        }
+    }
+}
+
 $mojibakeSequences = @(
     (ConvertFrom-CodePoints @(0x0393, 0x00F2)),
     (ConvertFrom-CodePoints @(0x0393, 0x00F6)),
@@ -36,6 +53,10 @@ $tests = @(
 
 if (-not (Test-Path -LiteralPath $utf8Runner -PathType Leaf)) {
     throw "required strict UTF-8 runner is missing: $utf8Runner"
+}
+
+foreach ($script in Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.ps1") {
+    Assert-AsciiScript $script.FullName
 }
 
 foreach ($test in $tests) {
