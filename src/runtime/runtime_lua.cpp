@@ -410,9 +410,14 @@ bool Runtime::protected_call(ScriptVm& vm, int argument_count,
         return false;
     }
     const int function_index = top - argument_count;
+    if (vm_disabled(vm.state)) {
+        lua_settop(vm.state, function_index - 1);
+        return false;
+    }
     if (!lua_isfunction(vm.state, function_index)) {
         log(vm, std::string(context) +
                     " failed: protected-call target is not a function");
+        lua_settop(vm.state, function_index - 1);
         return false;
     }
     lua_pushcfunction(vm.state, &Runtime::lua_traceback);
