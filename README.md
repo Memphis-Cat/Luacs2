@@ -152,6 +152,58 @@ local grenades = require("cs2.grenades")
 
 The complete world API reference is in [`docs/world-apis.md`](docs/world-apis.md).
 
+## Weapon slots and replacement
+
+Every weapon table returned by `cs2.weapons` includes a `slot` field. Current values are:
+
+```text
+primary
+secondary
+knife
+grenade
+equipment
+c4
+melee
+other
+```
+
+`other` is a classification fallback and is not a replaceable slot.
+
+Use `weapons.replace_slot(player, slot, classname, equip)` to replace all weapons in one classified slot, give the new weapon, and optionally equip it. `equip` defaults to `true`.
+
+```lua
+local weapons = require("cs2.weapons")
+
+local awp, err = weapons.replace_slot(
+    player,
+    "primary",
+    "weapon_awp",
+    true
+)
+
+if not awp then
+    print(err)
+    return
+end
+
+print(awp.classname, awp.slot)
+```
+
+The requested slot must match the target classname. For example, attempting to replace `secondary` with `weapon_ak47` is rejected instead of silently removing the wrong category.
+
+`auto` is accepted as an input mode when the target classname should select its own slot automatically:
+
+```lua
+local deagle, err = weapons.replace_slot(
+    player,
+    "auto",
+    "weapon_deagle",
+    true
+)
+```
+
+`auto` is never returned by `weapon.slot`.
+
 ## Event implementation
 
 LuaCS acquires the live `IGameEventManager2` interface from the Source 2 engine factory and installs pre/post `FireEvent` hooks on that real interface. It does not require an RTTI scan to discover a `CGameEventManager` vtable.
