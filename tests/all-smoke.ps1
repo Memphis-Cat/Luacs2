@@ -23,10 +23,11 @@ function Assert-AsciiScript {
     $bytes = [System.IO.File]::ReadAllBytes($Path)
     for ($index = 0; $index -lt $bytes.Length; ++$index) {
         if ($bytes[$index] -gt 0x7F) {
-            throw (
+            $message = (
                 "PowerShell 5.1 compatibility requires ASCII-only test " +
-                "sources; '$Path' contains byte 0x{0:X2} at offset {1}" -f
-                $bytes[$index], $index)
+                "sources; '{0}' contains byte 0x{1:X2} at offset {2}") -f
+                $Path, $bytes[$index], $index
+            throw $message
         }
     }
 }
