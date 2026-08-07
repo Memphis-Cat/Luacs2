@@ -60,6 +60,32 @@ foreach ($script in Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.ps1") {
     Assert-AsciiScript $script.FullName
 }
 
+$probePath = Join-Path ([System.IO.Path]::GetTempPath()) (
+    "luacs-stale-exit-probe-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+try {
+    $probeSource = @'
+& cmd.exe /d /c exit 7
+Write-Host "stale native exit-code probe completed"
+'@
+    [System.IO.File]::WriteAllText(
+        $probePath,
+        $probeSource,
+        [System.Text.ASCIIEncoding]::new())
+
+    $probeOutput = (& powershell -NoProfile -ExecutionPolicy Bypass `
+        -File $utf8Runner -Script $probePath 2>&1 | Out-String)
+    $probeExitCode = $LASTEXITCODE
+    if ($probeExitCode -ne 0) {
+        throw (
+            "UTF-8 wrapper leaked stale native exit code " +
+            "$probeExitCode after a successful PowerShell test:`n" +
+            $probeOutput)
+    }
+}
+finally {
+    Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+}
+
 foreach ($test in $tests) {
     $path = Join-Path $PSScriptRoot $test
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
