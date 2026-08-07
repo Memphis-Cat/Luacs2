@@ -68,6 +68,14 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
 
     luaL_getmetatable(state, kTraceResultMeta);
     if (lua_istable(state, -1)) {
+        // hit_world and hit_entity are result boolean fields. Give the callable
+        // helpers distinct names so table fields never shadow the methods.
+        lua_getfield(state, -1, "__index");
+        if (lua_istable(state, -1)) {
+            add_function(state, api, "did_hit_world", &result_hit_world);
+            add_function(state, api, "did_hit_entity", &result_hit_entity);
+        }
+        lua_pop(state, 1);
         add_function(state, api, "__tostring", &verified_trace_result_tostring);
     }
     lua_pop(state, 1);
