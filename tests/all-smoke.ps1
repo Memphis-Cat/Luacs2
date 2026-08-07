@@ -52,6 +52,7 @@ $tests = @(
     "chat-command-routing-smoke.ps1",
     "weapon-inventory-smoke.ps1",
     "schema-properties-smoke.ps1",
+    "traces-grenades-smoke.ps1",
     "legacy-example-cleanup-smoke.ps1",
     "deploy-smoke.ps1"
 )
@@ -125,5 +126,5 @@ Write-Host (
     "signature scanner diagnostics, UTF-8 output, current-session error " +
     "logging, safe spawn readiness, Source 2 player_chat command routing, " +
     "safe weapon inventory removal and slot classification, verified schema " +
-    "property reflection/type safety, stale example cleanup, build stamps, " +
-    "and deployment failure paths.")
+    "property reflection/type safety, complete trace/grenade safety and Lua " +
+    "APIs, stale example cleanup, build stamps, and deployment failure paths.")
