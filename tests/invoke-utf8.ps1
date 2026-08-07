@@ -24,7 +24,11 @@ try {
     }
 }
 catch {
-    Write-Error $_
+    $message = $_.Exception.ToString()
+    [Console]::Error.WriteLine($message)
+    if ($_.ScriptStackTrace) {
+        [Console]::Error.WriteLine($_.ScriptStackTrace)
+    }
     exit 1
 }
 
