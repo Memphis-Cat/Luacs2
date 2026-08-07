@@ -421,10 +421,45 @@ bool Runtime::protected_call(ScriptVm& vm, int argument_count,
                                  function_index);
     lua_remove(vm.state, function_index);
     if (status == LUA_OK) return true;
-    const char* message = lua_tostring(vm.state, -1);
-    log(vm, std::string(context) + " failed: " +
-                (message ? message : "unknown Lua error"));
+
+    const char* raw_message = lua_tostring(vm.state, -1);
+    const std::string message =
+        raw_message ? raw_message : "unknown Lua error";
+    log(vm, std::string(context) + " failed: " + message);
     lua_pop(vm.state, 1);
+
+    bool loaded_plugin = false;
+    for (const auto& loaded : scripts_) {
+        if (loaded.get() == &vm) {
+            loaded_plugin = true;
+            break;
+        }
+    }
+    if (!loaded_plugin || vm_disabled(vm.state)) return false;
+
+    disable_vm(vm.state, std::string(context) + ": " + message);
+
+    for (auto& entry : vm.events) {
+        for (const auto& callback : entry.second) {
+            luaL_unref(vm.state, LUA_REGISTRYINDEX, callback.reference);
+        }
+    }
+    vm.events.clear();
+
+    for (auto& entry : vm.commands) {
+        for (int reference : entry.second) {
+            luaL_unref(vm.state, LUA_REGISTRYINDEX, reference);
+        }
+    }
+    vm.commands.clear();
+
+    for (const auto& timer : vm.timers) {
+        luaL_unref(vm.state, LUA_REGISTRYINDEX, timer.reference);
+    }
+    vm.timers.clear();
+
+    log(vm, "[ERROR] Plugin disabled after an uncaught Lua callback error. "
+            "Refresh or reload the plugin after fixing it; other plugins remain active.");
     return false;
 }
 
