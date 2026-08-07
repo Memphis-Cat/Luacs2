@@ -203,7 +203,7 @@ Assert-Contains $grenadeDocsText @(
     '## Supported types',
     '## Grenade objects',
     '## Native validation boundary',
-    'refresh() now updates the same Lua object in place',
+    '`refresh()` now updates the same Lua object in place',
     'spawn_incendiary',
     'by_thrower(player_or_slot'
 ) "grenade documentation"
