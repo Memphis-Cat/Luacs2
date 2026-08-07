@@ -12,18 +12,36 @@
 #include <iomanip>
 #include <regex>
 #include <sstream>
+#include <system_error>
 
 namespace luacs {
 using namespace detail;
 
 namespace {
 
+std::string path_text(const std::filesystem::path& path) {
+    const auto utf8 = path.u8string();
+    return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
+}
+
+bool path_exists(const std::filesystem::path& path, bool& exists,
+                 std::string& error) {
+    std::error_code filesystem_error;
+    exists = std::filesystem::exists(path, filesystem_error);
+    if (filesystem_error) {
+        error = "Could not inspect path '" + path_text(path) + "': " +
+                filesystem_error.message();
+        return false;
+    }
+    return true;
+}
+
 std::filesystem::path make_core_log_path(
     const std::filesystem::path& logs_dir) {
     const auto time_value =
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm local{};
-    localtime_s(&local, &time_value);
+    if (localtime_s(&local, &time_value) != 0) local = {};
 
     std::ostringstream name;
     name << "luacs-" << std::put_time(&local, "%Y%m%d-%H%M%S") << ".log";
@@ -37,6 +55,7 @@ std::optional<std::uint64_t> read_json_number(
 
     std::ostringstream contents;
     contents << input.rdbuf();
+    if (!input.eof() && input.fail()) return std::nullopt;
     const std::regex expression("\"" + std::string(field) +
                                 "\"\\s*:\\s*([0-9]+)");
     std::smatch match;
@@ -55,7 +74,7 @@ std::optional<std::uint64_t> read_json_number(
 std::size_t count_files_with_extension(
     const std::filesystem::path& directory, std::string_view extension) {
     std::error_code error;
-    if (!std::filesystem::exists(directory, error)) return 0;
+    if (!std::filesystem::exists(directory, error) || error) return 0;
 
     std::size_t count = 0;
     for (std::filesystem::recursive_directory_iterator iterator(
@@ -64,7 +83,8 @@ std::size_t count_files_with_extension(
              error),
          end;
          iterator != end && !error; iterator.increment(error)) {
-        if (iterator->is_regular_file(error) &&
+        std::error_code entry_error;
+        if (iterator->is_regular_file(entry_error) && !entry_error &&
             iterator->path().extension().string() == extension) {
             ++count;
         }
@@ -75,20 +95,38 @@ std::size_t count_files_with_extension(
 std::size_t count_native_modules(
     const std::filesystem::path& directory) {
     std::error_code error;
-    if (!std::filesystem::exists(directory, error)) return 0;
+    if (!std::filesystem::exists(directory, error) || error) return 0;
 
     std::size_t count = 0;
-    for (const auto& entry :
-         std::filesystem::directory_iterator(directory, error)) {
-        if (error) break;
-        if (!entry.is_regular_file(error) ||
-            entry.path().extension() != ".dll") {
+    std::filesystem::directory_iterator iterator(directory, error);
+    const std::filesystem::directory_iterator end;
+    for (; iterator != end && !error; iterator.increment(error)) {
+        std::error_code entry_error;
+        if (!iterator->is_regular_file(entry_error) || entry_error ||
+            iterator->path().extension() != ".dll") {
             continue;
         }
-        const auto name = entry.path().stem().string();
+        const auto name = iterator->path().stem().string();
         if (name != "luacs2" && name != "lua55") ++count;
     }
     return count;
+}
+
+std::string truncate_utf8(std::string_view value, std::size_t maximum) {
+    if (value.size() <= maximum) return std::string(value);
+    std::size_t end = maximum;
+    while (end > 0 &&
+           (static_cast<unsigned char>(value[end]) & 0xC0u) == 0x80u) {
+        --end;
+    }
+    if (end == 0) return {};
+    const unsigned char lead = static_cast<unsigned char>(value[end]);
+    std::size_t sequence_length = 1;
+    if ((lead & 0xE0u) == 0xC0u) sequence_length = 2;
+    else if ((lead & 0xF0u) == 0xE0u) sequence_length = 3;
+    else if ((lead & 0xF8u) == 0xF0u) sequence_length = 4;
+    if (end + sequence_length > maximum) return std::string(value.substr(0, end));
+    return std::string(value.substr(0, maximum));
 }
 
 } // namespace
@@ -109,9 +147,13 @@ bool Runtime::initialize(std::filesystem::path root,
     shutdown();
     root_ = std::move(root);
     bin_dir_ = root_ / "bin" / "win64";
-    if (!std::filesystem::exists(bin_dir_)) {
+    bool bin_exists = false;
+    if (!path_exists(bin_dir_, bin_exists, error)) return false;
+    if (!bin_exists) {
         const auto legacy_bin = root_ / "bin";
-        if (std::filesystem::exists(legacy_bin)) bin_dir_ = legacy_bin;
+        bool legacy_exists = false;
+        if (!path_exists(legacy_bin, legacy_exists, error)) return false;
+        if (legacy_exists) bin_dir_ = legacy_bin;
     }
     plugins_dir_ = root_ / "plugins";
     config_dir_ = root_ / "config";
@@ -127,12 +169,14 @@ bool Runtime::initialize(std::filesystem::path root,
                 filesystem_error.message();
         return false;
     }
+    filesystem_error.clear();
     std::filesystem::create_directories(config_dir_, filesystem_error);
     if (filesystem_error) {
         error = "Could not create config directory: " +
                 filesystem_error.message();
         return false;
     }
+    filesystem_error.clear();
     std::filesystem::create_directories(logs_dir_, filesystem_error);
     if (filesystem_error) {
         error = "Could not create logs directory: " +
@@ -145,15 +189,15 @@ bool Runtime::initialize(std::filesystem::path root,
         std::ofstream create_log(core_log_path_, std::ios::app);
         if (!create_log) {
             error = "Could not create core log file: " +
-                    core_log_path_.string();
+                    path_text(core_log_path_);
             return false;
         }
     }
 
     log_runtime("LuaCS is starting up...");
-    log_runtime("Runtime root: " + root_.string());
-    log_runtime("Native module directory: " + bin_dir_.string());
-    log_runtime("Core log: " + core_log_path_.string());
+    log_runtime("Runtime root: " + path_text(root_));
+    log_runtime("Native module directory: " + path_text(bin_dir_));
+    log_runtime("Core log: " + path_text(core_log_path_));
 
     const auto reference_dir = root_ / "gamedata" / "reference";
     const auto summary_path = reference_dir / "PACK_SUMMARY.json";
@@ -166,14 +210,19 @@ bool Runtime::initialize(std::filesystem::path root,
     const auto json_files =
         count_files_with_extension(reference_dir, ".json");
 
-    if (official_entries && std::filesystem::exists(official_path)) {
+    bool official_exists = false;
+    std::string official_error;
+    const bool official_checked =
+        path_exists(official_path, official_exists, official_error);
+    if (official_entries && official_checked && official_exists) {
         log_runtime("Successfully indexed " +
                     std::to_string(*official_entries) +
                     " official game data entries from " +
-                    official_path.string());
+                    path_text(official_path));
     } else {
+        if (!official_checked) log_runtime("[WARN] " + official_error);
         log_runtime("[WARN] Official game data summary was not available at " +
-                    summary_path.string());
+                    path_text(summary_path));
     }
     if (windows_entries) {
         log_runtime("Game data/reference pack contains " +
@@ -185,9 +234,10 @@ bool Runtime::initialize(std::filesystem::path root,
                     " game data/reference JSON files.");
     }
 
-    if (!std::filesystem::exists(bin_dir_)) {
+    if (!path_exists(bin_dir_, bin_exists, error)) return false;
+    if (!bin_exists) {
         error = "Native module directory was not found: " +
-                bin_dir_.string();
+                path_text(bin_dir_);
         log_runtime("[ERROR] " + error);
         return false;
     }
@@ -197,25 +247,41 @@ bool Runtime::initialize(std::filesystem::path root,
 
     bool has_compiled_plugins = false;
     std::size_t compiled_plugin_count = 0;
-    for (const auto& entry :
-         std::filesystem::directory_iterator(plugins_dir_)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".smg") {
+    std::error_code plugin_iterator_error;
+    std::filesystem::directory_iterator plugin_iterator(plugins_dir_,
+                                                         plugin_iterator_error);
+    const std::filesystem::directory_iterator plugin_end;
+    for (; plugin_iterator != plugin_end && !plugin_iterator_error;
+         plugin_iterator.increment(plugin_iterator_error)) {
+        std::error_code entry_error;
+        if (plugin_iterator->is_regular_file(entry_error) && !entry_error &&
+            plugin_iterator->path().extension() == ".smg") {
             has_compiled_plugins = true;
             ++compiled_plugin_count;
         }
     }
+    if (plugin_iterator_error) {
+        error = "Could not enumerate plugins directory: " +
+                plugin_iterator_error.message();
+        log_runtime("[ERROR] " + error);
+        return false;
+    }
 
     const auto key_path = config_dir_ / "luacs.key";
-    const bool key_existed = std::filesystem::exists(key_path);
+    bool key_existed = false;
+    if (!path_exists(key_path, key_existed, error)) {
+        log_runtime("[ERROR] " + error);
+        return false;
+    }
     if (!smg::load_or_create_key(key_path, !has_compiled_plugins, key_,
                                  error)) {
         log_runtime("[ERROR] " + error);
         return false;
     }
     log_runtime(std::string(key_existed ? "Loaded" : "Created") +
-                " SMG encryption key at " + key_path.string());
+                " SMG encryption key at " + path_text(key_path));
     log_runtime("Found " + std::to_string(compiled_plugin_count) +
-                " compiled Lua plugin(s) in " + plugins_dir_.string());
+                " compiled Lua plugin(s) in " + path_text(plugins_dir_));
 
     services_ = {};
     services_.abi_version = kModuleAbiVersion;
@@ -256,18 +322,34 @@ void Runtime::shutdown() {
 }
 
 void Runtime::load_plugins() {
-    if (!std::filesystem::exists(plugins_dir_)) {
+    std::string path_error;
+    bool plugins_exist = false;
+    if (!path_exists(plugins_dir_, plugins_exist, path_error)) {
+        log_runtime("[ERROR] " + path_error);
+        return;
+    }
+    if (!plugins_exist) {
         log_runtime("[WARN] Plugins directory does not exist: " +
-                    plugins_dir_.string());
+                    path_text(plugins_dir_));
         return;
     }
 
     std::vector<std::filesystem::path> paths;
-    for (const auto& entry :
-         std::filesystem::directory_iterator(plugins_dir_)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".smg") {
-            paths.push_back(entry.path());
+    std::error_code iterator_error;
+    std::filesystem::directory_iterator iterator(plugins_dir_, iterator_error);
+    const std::filesystem::directory_iterator end;
+    for (; iterator != end && !iterator_error;
+         iterator.increment(iterator_error)) {
+        std::error_code entry_error;
+        if (iterator->is_regular_file(entry_error) && !entry_error &&
+            iterator->path().extension() == ".smg") {
+            paths.push_back(iterator->path());
         }
+    }
+    if (iterator_error) {
+        log_runtime("[ERROR] Could not enumerate plugins directory: " +
+                    iterator_error.message());
+        return;
     }
     std::sort(paths.begin(), paths.end());
 
@@ -291,10 +373,10 @@ void Runtime::load_plugins() {
 }
 
 bool Runtime::load_plugin(const std::filesystem::path& path) {
-    const std::string key = normalize_name(path.stem().string());
+    const std::string key = normalize_name(path_text(path.stem()));
     const auto fail = [&](std::string message) {
         plugin_failures_[key] = message;
-        log_runtime("[ERROR] Could not load " + path.filename().string() +
+        log_runtime("[ERROR] Could not load " + path_text(path.filename()) +
                     ": " + message);
         return false;
     };
@@ -302,11 +384,14 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
     smg::Package package;
     std::string error;
     if (!smg::read(path, key_, package, error)) return fail(error);
+    if (package.bytecode.empty()) {
+        return fail("authenticated SMG package contains empty Lua bytecode");
+    }
 
     auto vm = std::make_unique<ScriptVm>();
     vm->runtime = this;
     vm->source_path = path;
-    vm->name = path.stem().string();
+    vm->name = path_text(path.stem());
     vm->author = "Unknown";
     vm->version = "Unspecified";
     vm->log_path = create_log_path();
@@ -317,7 +402,7 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
         std::ofstream create_plugin_log(vm->log_path, std::ios::app);
         if (!create_plugin_log) {
             return fail("could not create plugin log " +
-                        vm->log_path.string());
+                        path_text(vm->log_path));
         }
     }
 
@@ -329,10 +414,10 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
         return fail("core API initialization failed; see the plugin log");
     }
 
-    const int status = luaL_loadbufferx(
-        vm->state,
-        reinterpret_cast<const char*>(package.bytecode.data()),
-        package.bytecode.size(), vm->name.c_str(), "b");
+    const char* bytecode = reinterpret_cast<const char*>(package.bytecode.data());
+    const int status = luaL_loadbufferx(vm->state, bytecode,
+                                        package.bytecode.size(), vm->name.c_str(),
+                                        "b");
     if (status != LUA_OK) {
         const char* message = lua_tostring(vm->state, -1);
         const std::string detail =
@@ -350,14 +435,14 @@ bool Runtime::load_plugin(const std::filesystem::path& path) {
     plugin_failures_.erase(key);
     plugin_metadata_cache_[key] =
         PluginMetadata{vm->name, vm->author, vm->version, vm->description};
-    log(*vm, "Loaded plugin '" + vm->name + "' from " + path.string());
+    log(*vm, "Loaded plugin '" + vm->name + "' from " + path_text(path));
     scripts_.push_back(std::move(vm));
     return true;
 }
 
 void Runtime::read_plugin_metadata(ScriptVm& vm) {
     PluginMetadata metadata;
-    metadata.name = vm.source_path.stem().string();
+    metadata.name = path_text(vm.source_path.stem());
     metadata.author = "Unknown";
     metadata.version = "Unspecified";
 
@@ -372,7 +457,7 @@ void Runtime::read_plugin_metadata(ScriptVm& vm) {
                 std::size_t length{};
                 const char* text = lua_tolstring(vm.state, -1, &length);
                 if (text && length != 0) {
-                    value.assign(text, std::min(length, maximum));
+                    value = truncate_utf8(std::string_view(text, length), maximum);
                 }
             }
             lua_pop(vm.state, 1);
@@ -400,12 +485,17 @@ void Runtime::read_plugin_metadata(ScriptVm& vm) {
 
 void Runtime::tick() {
     const double current = now();
+    if (!std::isfinite(current)) {
+        log_runtime("[ERROR] Runtime clock returned a non-finite value; skipping frame.");
+        return;
+    }
     for (auto& vm_ptr : scripts_) {
         auto& vm = *vm_ptr;
         std::vector<std::uint64_t> due_ids;
         due_ids.reserve(vm.timers.size());
         for (const auto& timer : vm.timers) {
-            if (!timer.cancelled && timer.due <= current) {
+            if (!timer.cancelled && std::isfinite(timer.due) &&
+                timer.due <= current) {
                 due_ids.push_back(timer.id);
             }
         }
@@ -427,7 +517,13 @@ void Runtime::tick() {
             if (found == vm.timers.end()) continue;
             if (!succeeded) found->cancelled = true;
             if (found->repeat && !found->cancelled) {
-                found->due = current + found->interval;
+                const double next_due = current + found->interval;
+                if (!std::isfinite(next_due)) {
+                    log(*vm, "[ERROR] Repeating timer overflowed its due time and was cancelled.");
+                    found->cancelled = true;
+                } else {
+                    found->due = next_due;
+                }
             } else {
                 found->cancelled = true;
             }
