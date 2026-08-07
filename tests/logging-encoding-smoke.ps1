@@ -73,16 +73,22 @@ foreach ($required in @(
 $generatedPluginText = [System.IO.File]::ReadAllText($generatedPlugin)
 Assert-Contains $generatedPluginText @(
     'g_native_error_log = root / "logs" / "luacs-errors.log";',
-    'std::filesystem::remove(g_native_error_log, reset_error);',
-    'std::ofstream clear_error_log(g_native_error_log,',
-    'std::ios::trunc',
-    'if (clear_error_log) clear_error_log.close();',
+    'std::error_code remove_error;',
+    'std::filesystem::remove(g_native_error_log, remove_error);',
+    'if (remove_error) {',
+    'Could not reset the current-session native error log:',
+    'std::ofstream output(g_native_error_log,',
+    'std::ios::app | std::ios::binary',
     'append_native_error(line);',
     'line.find("[ERROR]") == std::string_view::npos'
 ) "generated current-session native error logger"
+Assert-Omits $generatedPluginText @(
+    'std::ofstream clear_error_log(g_native_error_log,',
+    'if (clear_error_log) clear_error_log.close();'
+) "obsolete native error log truncation implementation"
 
 $resetIndex = $generatedPluginText.IndexOf(
-    'std::filesystem::remove(g_native_error_log, reset_error);',
+    'std::filesystem::remove(g_native_error_log, remove_error);',
     [System.StringComparison]::Ordinal)
 $initializeIndex = $generatedPluginText.IndexOf(
     'game_api_.initialize(root, game_api_error)',
