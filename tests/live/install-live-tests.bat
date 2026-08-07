@@ -43,6 +43,8 @@ if /I "%MODE%"=="isolation" (
     if errorlevel 1 exit /b 1
     call :install_one apitest_unload_crash.lua
     if errorlevel 1 exit /b 1
+    call :install_one apitest_disconnect_race.lua
+    if errorlevel 1 exit /b 1
 )
 
 echo.
@@ -73,6 +75,10 @@ if /I "%MODE%"=="isolation" (
     echo   lua plugins load apitest_unload_crash
     echo   lua plugins unload apitest_unload_crash
     echo   lua plugins force_unload apitest_unload_crash
+    echo.
+    echo Disconnect-race verifies delayed stale-player access is safe:
+    echo   lua plugins load apitest_disconnect_race
+    echo Then disconnect a player and wait at least 3 seconds.
 )
 exit /b 0
 
