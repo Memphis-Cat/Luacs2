@@ -14,6 +14,7 @@ for %%N in (
     apitest_callback_crash
     apitest_startup_crash
     apitest_unload_crash
+    apitest_disconnect_race
 ) do (
     del /Q "%SCRIPTING%\%%N.lua" 2>nul
     del /Q "%PLUGINS%\%%N.smg" 2>nul
