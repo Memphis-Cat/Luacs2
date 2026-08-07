@@ -146,9 +146,62 @@ Assert-Contains $moduleText @(
     'lua_createtable(state, 0, 12);'
 ) "weapon.slot classification"
 
+$replaceStart = $moduleText.IndexOf(
+    "int replace_slot(lua_State* state)",
+    [System.StringComparison]::Ordinal)
+$dropStart = $moduleText.IndexOf(
+    "int drop(lua_State* state)",
+    $replaceStart,
+    [System.StringComparison]::Ordinal)
+if ($replaceStart -lt 0 -or $dropStart -le $replaceStart) {
+    throw "could not isolate weapons.replace_slot"
+}
+$replaceBody = $moduleText.Substring($replaceStart, $dropStart - $replaceStart)
+
+Assert-Contains $replaceBody @(
+    'const std::string requested_slot = lower(luaL_checkstring(state, 2));',
+    'requested_slot != "auto"',
+    '"primary", "secondary", "knife", "grenade", "equipment",',
+    'weapon classname is classified as other and cannot replace a slot',
+    'weapon classname belongs to slot',
+    'api->weapon_count(api->context, player_slot, error, sizeof(error))',
+    'classify_weapon_slot(lower(existing.classname)) != classified_slot',
+    'api->weapon_remove(api->context, player_slot,',
+    'api->weapon_give(api->context, player_slot, normalized_class.c_str(),',
+    'api->weapon_switch(api->context, player_slot,',
+    'rollback failed:',
+    'replacement.active = true;',
+    'push_weapon(state, replacement);'
+) "weapons.replace_slot implementation"
+
+$removeIndex = $replaceBody.IndexOf(
+    'api->weapon_remove(api->context, player_slot,',
+    [System.StringComparison]::Ordinal)
+$giveIndex = $replaceBody.IndexOf(
+    'api->weapon_give(api->context, player_slot, normalized_class.c_str(),',
+    [System.StringComparison]::Ordinal)
+$switchIndex = $replaceBody.IndexOf(
+    'api->weapon_switch(api->context, player_slot,',
+    [System.StringComparison]::Ordinal)
+$pushIndex = $replaceBody.IndexOf(
+    'push_weapon(state, replacement);',
+    [System.StringComparison]::Ordinal)
+if ($removeIndex -lt 0 -or $giveIndex -lt 0 -or $switchIndex -lt 0 -or
+    $pushIndex -lt 0 -or $removeIndex -ge $giveIndex -or
+    $giveIndex -ge $switchIndex -or $switchIndex -ge $pushIndex) {
+    throw (
+        "replace_slot must remove the old slot, give the replacement, " +
+        "optionally switch to it, and only then return the weapon")
+}
+
+Assert-Contains $moduleText @(
+    'lua_createtable(state, 0, 21);',
+    'add_function(state, api, "replace_slot", &replace_slot);'
+) "weapons.replace_slot export"
+
 Write-Host (
     "LuaCS weapon inventory tests passed: removal repairs m_hMyWeapons " +
-    "directly instead of using an asynchronous DropWeapon fallback, clears " +
-    "active/last references before destruction, inventory enumeration prunes " +
-    "dead handles, and weapon.slot exposes primary, secondary, knife, " +
-    "grenade, equipment, c4, melee, and other without changing ABI.")
+    "directly, enumeration prunes dead handles, weapon.slot exposes stable " +
+    "categories, and weapons.replace_slot validates explicit/auto slots, " +
+    "replaces in reverse inventory order, rolls back failed equips, and " +
+    "returns the replacement without changing module ABI.")
