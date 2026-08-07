@@ -229,6 +229,7 @@ add_library(luacs2 SHARED
     "${HL2SDK_CS2_ROOT}/tier1/convar.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_chookidman.cpp"
+    "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_chookmaninfo.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_cvfnptr.cpp"
     "${MMSOURCE_ROOT}/core/sourcehook/sourcehook_impl_cproto.cpp")
 
