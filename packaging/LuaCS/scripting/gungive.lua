@@ -1,11 +1,11 @@
-local commands = require("cs2.commands")
+local events = require("cs2.events")
 local weapons = require("cs2.weapons")
 
 plugin = {
     name = "Gun Give",
     author = "LuaCS",
-    version = "1.0.0",
-    description = "Chat commands for testing LuaCS weapon giving."
+    version = "1.1.0",
+    description = "Chat-event weapon-give diagnostic plugin."
 }
 
 local aliases = {
@@ -29,7 +29,7 @@ end
 local function give_weapon(player, classname, command_name)
     if not player then
         print("[WARN] !" .. command_name ..
-            " was invoked without a player context")
+            " was received from player_chat but userid could not be resolved")
         return
     end
 
@@ -64,24 +64,60 @@ local function give_weapon(player, classname, command_name)
         tostring(weapon.entity_index or "?"))
 end
 
-for command_name, classname in pairs(aliases) do
-    commands.on(command_name, function(player)
-        give_weapon(player, classname, command_name)
-    end)
+local function trim(value)
+    return (tostring(value or ""):match("^%s*(.-)%s*$") or "")
 end
 
-commands.on("gun", function(player, arguments)
-    local requested = tostring(arguments or "")
-    requested = requested:match("^%s*(.-)%s*$") or ""
-    if requested == "" then
+local function handle_chat(event)
+    local text = event:get_string("text", "")
+    if not text or text == "" then
+        return
+    end
+
+    local prefix = text:sub(1, 1)
+    if prefix ~= "!" and prefix ~= "/" then
+        return
+    end
+
+    local body = trim(text:sub(2))
+    local command_name, arguments = body:match("^(%S+)%s*(.-)$")
+    command_name = string.lower(command_name or "")
+    arguments = trim(arguments)
+    if command_name == "" then
+        return
+    end
+
+    local player = event:get_player("userid")
+    print("[INFO] player_chat received command !" .. command_name .. " from " ..
+        player_label(player) ..
+        (arguments ~= "" and (" args='" .. arguments .. "'") or ""))
+
+    local classname = aliases[command_name]
+    if classname then
+        give_weapon(player, classname, command_name)
+        return
+    end
+
+    if command_name ~= "gun" then
+        return
+    end
+
+    if arguments == "" then
         print("[WARN] !gun requires a classname, for example !gun weapon_ak47")
         return
+    end
+
+    local requested = string.lower(arguments)
+    if not requested:match("^weapon_") then
+        requested = "weapon_" .. requested
     end
     if not requested:match("^weapon_[%w_]+$") then
         print("[WARN] !gun rejected invalid classname: " .. requested)
         return
     end
     give_weapon(player, requested, "gun")
-end)
+end
 
-print("[INFO] Gun Give registered chat commands: !ak, !ak47, !awp, !deagle, !m4, !m4a1, !m4a1s, !gun <weapon_classname>")
+events.on("player_chat", handle_chat)
+
+print("[INFO] Gun Give registered player_chat commands: !ak, !ak47, !awp, !deagle, !m4, !m4a1, !m4a1s, !gun <ak47|weapon_classname>")
