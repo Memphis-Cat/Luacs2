@@ -50,6 +50,7 @@ $tests = @(
     "generated-source-smoke.ps1",
     "logging-encoding-smoke.ps1",
     "chat-command-routing-smoke.ps1",
+    "weapon-inventory-smoke.ps1",
     "legacy-example-cleanup-smoke.ps1",
     "deploy-smoke.ps1"
 )
@@ -122,4 +123,5 @@ Write-Host (
     "All LuaCS smoke suites passed: compiler/package integrity, generated " +
     "signature scanner diagnostics, UTF-8 output, current-session error " +
     "logging, safe spawn readiness, Source 2 player_chat command routing, " +
-    "stale example cleanup, build stamps, and deployment failure paths.")
+    "safe weapon inventory removal and slot classification, stale example " +
+    "cleanup, build stamps, and deployment failure paths.")
