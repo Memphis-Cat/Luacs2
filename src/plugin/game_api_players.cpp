@@ -35,6 +35,18 @@ bool inventory_contains(const CUtlVector<CEntityHandle>* inventory,
     return false;
 }
 
+int inventory_remove_handle(CUtlVector<CEntityHandle>* inventory,
+                            const CEntityHandle& handle) {
+    if (!inventory) return 0;
+    int removed = 0;
+    for (int index = inventory->Count() - 1; index >= 0; --index) {
+        if ((*inventory)[index] != handle) continue;
+        inventory->Remove(index);
+        ++removed;
+    }
+    return removed;
+}
+
 } // namespace
 
 bool LuaCSGameApiImpl::player_state(int slot, luacs::PlayerState& output,
@@ -377,8 +389,24 @@ bool LuaCSGameApiImpl::weapon_drop_active(int slot,
 std::size_t LuaCSGameApiImpl::weapon_count(int slot,
                                            std::string& error) const {
     void* weapon_services{};
-    const auto* weapons = inventory(slot, weapon_services, error);
-    return weapons ? static_cast<std::size_t>(weapons->Count()) : 0;
+    auto* weapons = inventory(slot, weapon_services, error);
+    if (!weapons || !weapon_services) return 0;
+
+    CEntityInstance* player_pawn = pawn(slot, error);
+    if (!player_pawn) return 0;
+
+    bool repaired = false;
+    for (int index = weapons->Count() - 1; index >= 0; --index) {
+        if (entity_by_handle((*weapons)[index])) continue;
+        weapons->Remove(index);
+        repaired = true;
+    }
+    if (repaired) {
+        state_changed(player_pawn,
+                      static_cast<std::uint32_t>(weapon_services_offset),
+                      static_cast<std::uint32_t>(weapons_vector_offset));
+    }
+    return static_cast<std::size_t>(weapons->Count());
 }
 
 bool LuaCSGameApiImpl::weapon_at(int slot, std::size_t index,
@@ -386,18 +414,24 @@ bool LuaCSGameApiImpl::weapon_at(int slot, std::size_t index,
                                  std::string& error) const {
     void* weapon_services{};
     auto* weapons = inventory(slot, weapon_services, error);
-    if (!weapons) return false;
-    if (index >= static_cast<std::size_t>(weapons->Count())) {
-        error = "inventory index is out of range";
-        return false;
+    if (!weapons || !weapon_services) return false;
+
+    CEntityInstance* player_pawn = pawn(slot, error);
+    if (!player_pawn) return false;
+
+    while (index < static_cast<std::size_t>(weapons->Count())) {
+        const CEntityHandle handle = (*weapons)[static_cast<int>(index)];
+        CEntityInstance* weapon = entity_by_handle(handle);
+        if (weapon) return fill_weapon(weapon, slot, output, error);
+
+        weapons->Remove(static_cast<int>(index));
+        state_changed(player_pawn,
+                      static_cast<std::uint32_t>(weapon_services_offset),
+                      static_cast<std::uint32_t>(weapons_vector_offset));
     }
-    CEntityInstance* weapon = entity_by_handle(
-        (*weapons)[static_cast<int>(index)]);
-    if (!weapon) {
-        error = "inventory entry refers to an invalid weapon entity";
-        return false;
-    }
-    return fill_weapon(weapon, slot, output, error);
+
+    error = "inventory index is out of range";
+    return false;
 }
 
 bool LuaCSGameApiImpl::weapon_get(int entity_index,
@@ -417,6 +451,7 @@ bool LuaCSGameApiImpl::weapon_remove(int slot, int entity_index,
     void* weapon_services{};
     auto* weapons = inventory(slot, weapon_services, error);
     if (!weapons || !weapon_services) return false;
+
     CEntityInstance* weapon = entity_by_index(entity_index);
     if (!weapon) {
         error = "the selected weapon entity is invalid";
@@ -443,19 +478,36 @@ bool LuaCSGameApiImpl::weapon_remove(int slot, int entity_index,
     remove_player_item(player_pawn, weapon);
 
     if (inventory_contains(weapons, weapon_handle)) {
-        const auto drop = virtual_function<DropWeaponFn>(weapon_services,
-                                                         drop_weapon_index);
-        if (!drop) {
-            error = "weapon remained in m_hMyWeapons after RemovePlayerItem and "
-                    "CCSPlayer_WeaponServices::DropWeapon is unavailable";
+        const int removed = inventory_remove_handle(weapons, weapon_handle);
+        if (removed <= 0) {
+            error = "RemovePlayerItem left the weapon in m_hMyWeapons and LuaCS "
+                    "could not remove the stale inventory handle";
             return false;
         }
-        drop(weapon_services, weapon, nullptr, nullptr);
+        state_changed(player_pawn,
+                      static_cast<std::uint32_t>(weapon_services_offset),
+                      static_cast<std::uint32_t>(weapons_vector_offset));
+    }
+
+    auto& active = field<CEntityHandle>(weapon_services, active_weapon_offset);
+    if (active == weapon_handle) {
+        active.Term();
+        state_changed(player_pawn,
+                      static_cast<std::uint32_t>(weapon_services_offset),
+                      static_cast<std::uint32_t>(active_weapon_offset));
+    }
+
+    auto& last = field<CEntityHandle>(weapon_services, last_weapon_offset);
+    if (last == weapon_handle) {
+        last.Term();
+        state_changed(player_pawn,
+                      static_cast<std::uint32_t>(weapon_services_offset),
+                      static_cast<std::uint32_t>(last_weapon_offset));
     }
 
     if (inventory_contains(weapons, weapon_handle)) {
-        error = "CS2 did not detach the weapon from m_hMyWeapons; refusing to "
-                "destroy an entity that is still referenced by the inventory";
+        error = "weapon handle is still present in m_hMyWeapons after explicit "
+                "inventory repair; refusing to destroy the entity";
         return false;
     }
 
