@@ -14,5 +14,21 @@ $utf8 = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $global:OutputEncoding = $utf8
 
-& (Resolve-Path -LiteralPath $Script).Path
-exit $LASTEXITCODE
+$scriptPath = (Resolve-Path -LiteralPath $Script).Path
+$global:LASTEXITCODE = 0
+
+try {
+    & $scriptPath
+    if (-not $?) {
+        exit 1
+    }
+}
+catch {
+    Write-Error $_
+    exit 1
+}
+
+# A successful PowerShell test may intentionally run native commands that
+# return nonzero while verifying failure paths. Do not leak that stale native
+# exit code after the script itself completed successfully.
+exit 0
