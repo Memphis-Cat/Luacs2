@@ -2,13 +2,13 @@
 
 #include "runtime.h"
 
+#include <igameevents.h>
+
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
 
-class IGameEvent;
-class IGameEventManager2;
 struct LuaCSGameApiImpl;
 
 struct LuaCSEventDecision {
@@ -30,6 +30,13 @@ public:
 
     IGameEventManager2* event_manager() const;
     void set_event_manager(IGameEventManager2* manager);
+    void set_game_event_manager(IGameEventManager2* manager) {
+        set_event_manager(manager);
+    }
+    void free_event(IGameEvent* event) {
+        if (!event) return;
+        if (auto* manager = event_manager()) manager->FreeEvent(event);
+    }
     void* event_manager_vtable() const;
 
     std::uint64_t begin_event(IGameEvent* event, bool post,
