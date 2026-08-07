@@ -1,3 +1,4 @@
+#include "luacs/lua_checked.h"
 #include "luacs/module_api.h"
 #include "luacs/world_module.h"
 
@@ -6,6 +7,7 @@ extern "C" {
 }
 
 #include <cstdint>
+#include <limits>
 
 namespace {
 
@@ -27,25 +29,22 @@ const WorldServices* world(lua_State* state) {
 
 int slot_from(lua_State* state, int index) {
     if (lua_isinteger(state, index)) {
-        return static_cast<int>(lua_tointeger(state, index));
+        return luacs::lua_checked::checked_slot(state, index);
     }
     luaL_checktype(state, index, LUA_TTABLE);
-    lua_getfield(state, index, "slot");
-    const int slot = static_cast<int>(luaL_checkinteger(state, -1));
+    const int table = lua_absindex(state, index);
+    lua_getfield(state, table, "slot");
+    const int slot = luacs::lua_checked::checked_slot(state, -1);
     lua_pop(state, 1);
     return slot;
 }
 
 int check_team(lua_State* state, int index, bool playable_only = false) {
-    const int team = static_cast<int>(luaL_checkinteger(state, index));
     const int minimum = playable_only ? 1 : 0;
-    if (team < minimum || team > 3) {
-        return luaL_argerror(state, index,
-                             playable_only
-                                 ? "team must be SPECTATOR, T, or CT"
-                                 : "team must be NONE, SPECTATOR, T, or CT");
-    }
-    return team;
+    return luacs::lua_checked::checked_int(
+        state, index, minimum, 3,
+        playable_only ? "team must be SPECTATOR, T, or CT"
+                      : "team must be NONE, SPECTATOR, T, or CT");
 }
 
 int fail(lua_State* state, const char* error) {
@@ -61,7 +60,7 @@ void push_player(lua_State* state, const PlayerInfo& player,
     lua_setfield(state, -2, "slot");
     lua_pushstring(state, player.name ? player.name : "");
     lua_setfield(state, -2, "name");
-    lua_pushinteger(state, static_cast<lua_Integer>(player.steam64));
+    luacs::lua_checked::push_u64_exact(state, player.steam64);
     lua_setfield(state, -2, "steam64");
     lua_pushstring(state, player.steam_id ? player.steam_id : "");
     lua_setfield(state, -2, "steamid");
@@ -101,9 +100,10 @@ int change_impl(lua_State* state, bool switch_team) {
     const int team = check_team(state, 2, true);
     char error[256]{};
     if (!api || !api->player_change_team ||
-        !api->player_change_team(api->context, slot, team, switch_team,
-                                 error, sizeof(error))) {
-        return fail(state, error[0] ? error : "player team service is unavailable");
+        !api->player_change_team(api->context, slot, team, switch_team, error,
+                                 sizeof(error))) {
+        return fail(state,
+                    error[0] ? error : "player team service is unavailable");
     }
     if (lua_istable(state, 1)) {
         lua_pushinteger(state, team);
@@ -129,6 +129,7 @@ int get_players(lua_State* state) {
     for (std::size_t index = 0; index < count; ++index) {
         PlayerInfo player;
         if (!api->player_at(api->context, index, &player)) continue;
+        if (player.slot < 0 || player.slot >= 64) continue;
         PlayerState live;
         char error[256]{};
         if (!api->player_state(api->context, player.slot, &live, error,
@@ -150,8 +151,10 @@ int get_score(lua_State* state) {
     if (!api || !api->team_get_score ||
         !api->team_get_score(api->context, team, &score, error,
                              sizeof(error))) {
-        return fail(state, error[0] ? error : "team score service is unavailable");
+        return fail(state,
+                    error[0] ? error : "team score service is unavailable");
     }
+    if (score < 0) return fail(state, "Source 2 returned a negative team score");
     lua_pushinteger(state, score);
     return 1;
 }
@@ -159,13 +162,15 @@ int get_score(lua_State* state) {
 int set_score(lua_State* state) {
     const auto* api = world(state);
     const int team = check_team(state, 1, true);
-    const int score = static_cast<int>(luaL_checkinteger(state, 2));
-    if (score < 0) return luaL_argerror(state, 2, "score cannot be negative");
+    const int score = luacs::lua_checked::checked_int(
+        state, 2, 0, std::numeric_limits<int>::max(),
+        "score must be a non-negative 32-bit integer");
     char error[256]{};
     if (!api || !api->team_set_score ||
         !api->team_set_score(api->context, team, score, error,
                              sizeof(error))) {
-        return fail(state, error[0] ? error : "team score service is unavailable");
+        return fail(state,
+                    error[0] ? error : "team score service is unavailable");
     }
     lua_pushboolean(state, true);
     return 1;
@@ -174,22 +179,32 @@ int set_score(lua_State* state) {
 int add_score(lua_State* state) {
     const auto* api = world(state);
     const int team = check_team(state, 1, true);
-    const int delta = static_cast<int>(luaL_checkinteger(state, 2));
+    const int delta = luacs::lua_checked::checked_int(
+        state, 2, std::numeric_limits<int>::min(),
+        std::numeric_limits<int>::max(), "score delta must fit a 32-bit integer");
     int score = 0;
     char error[256]{};
     if (!api || !api->team_get_score || !api->team_set_score ||
         !api->team_get_score(api->context, team, &score, error,
                              sizeof(error))) {
-        return fail(state, error[0] ? error : "team score service is unavailable");
+        return fail(state,
+                    error[0] ? error : "team score service is unavailable");
     }
-    if (score + delta < 0) {
-        return luaL_argerror(state, 2, "resulting score cannot be negative");
+    if (score < 0) return fail(state, "Source 2 returned a negative team score");
+
+    const std::int64_t result = static_cast<std::int64_t>(score) +
+                                static_cast<std::int64_t>(delta);
+    if (result < 0 || result > std::numeric_limits<int>::max()) {
+        return luaL_argerror(
+            state, 2,
+            "resulting score must be between 0 and INT_MAX");
     }
-    if (!api->team_set_score(api->context, team, score + delta, error,
+    const int new_score = static_cast<int>(result);
+    if (!api->team_set_score(api->context, team, new_score, error,
                              sizeof(error))) {
-        return fail(state, error);
+        return fail(state, error[0] ? error : "team score update failed");
     }
-    lua_pushinteger(state, score + delta);
+    lua_pushinteger(state, new_score);
     return 1;
 }
 
