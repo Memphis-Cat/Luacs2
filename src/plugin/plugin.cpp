@@ -184,7 +184,7 @@ void append_native_error(std::string_view line) {
     output.write(timestamp, static_cast<std::streamsize>(std::strlen(timestamp)));
     if (!line.empty()) {
         output.write(line.data(), static_cast<std::streamsize>(
-                                      std::min<std::size_t>(line.size(), 1u << 20))));
+                                      std::min<std::size_t>(line.size(), 1u << 20)));
     }
     output.put('\n');
 }
