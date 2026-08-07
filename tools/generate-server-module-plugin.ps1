@@ -8,14 +8,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Normalize-Newlines {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    return $Value.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
 $sourcePath = [System.IO.Path]::GetFullPath($Source)
 $destinationPath = [System.IO.Path]::GetFullPath($Destination)
 if (-not [System.IO.File]::Exists($sourcePath)) {
     throw "Plugin source file does not exist: $sourcePath"
 }
 
-$text = [System.IO.File]::ReadAllText($sourcePath)
-$text = $text.Replace("`r`n", "`n")
+$text = Normalize-Newlines ([System.IO.File]::ReadAllText($sourcePath))
 
 $headerMarker = @'
 #include "plugin.h"
@@ -158,11 +162,12 @@ function Assert-ExactlyOnce {
         [Parameter(Mandatory = $true)][string]$Label
     )
 
-    $first = $InputText.IndexOf($Marker, [StringComparison]::Ordinal)
+    $normalizedMarker = (Normalize-Newlines $Marker).TrimEnd("`n")
+    $first = $InputText.IndexOf($normalizedMarker, [StringComparison]::Ordinal)
     if ($first -lt 0) {
         throw "$Label marker was not found in plugin.cpp"
     }
-    if ($InputText.IndexOf($Marker, $first + $Marker.Length,
+    if ($InputText.IndexOf($normalizedMarker, $first + $normalizedMarker.Length,
                            [StringComparison]::Ordinal) -ge 0) {
         throw "$Label marker appeared more than once in plugin.cpp"
     }
@@ -176,10 +181,12 @@ function Replace-ExactlyOnce {
         [Parameter(Mandatory = $true)][string]$Label
     )
 
-    Assert-ExactlyOnce $InputText $Marker $Label
-    $first = $InputText.IndexOf($Marker, [StringComparison]::Ordinal)
-    return $InputText.Substring(0, $first) + $Replacement +
-           $InputText.Substring($first + $Marker.Length)
+    $normalizedMarker = (Normalize-Newlines $Marker).TrimEnd("`n")
+    $normalizedReplacement = (Normalize-Newlines $Replacement).TrimEnd("`n")
+    Assert-ExactlyOnce $InputText $normalizedMarker $Label
+    $first = $InputText.IndexOf($normalizedMarker, [StringComparison]::Ordinal)
+    return $InputText.Substring(0, $first) + $normalizedReplacement +
+           $InputText.Substring($first + $normalizedMarker.Length)
 }
 
 $text = Replace-ExactlyOnce $text $headerMarker $headerReplacement "plugin header"
