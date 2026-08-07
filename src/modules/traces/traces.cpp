@@ -6,9 +6,12 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 
 namespace {
 using luacs::AdvancedWorldServices;
@@ -18,6 +21,8 @@ using luacs::TraceResult;
 using luacs::TraceShape;
 using luacs::Vector3;
 
+inline constexpr const char* kTraceResultMeta = "LuaCS.TraceResult";
+
 const AdvancedWorldServices* advanced() {
     return luacs::resolve_advanced_world_services();
 }
@@ -26,6 +31,11 @@ int fail(lua_State* state, const char* error) {
     lua_pushnil(state);
     lua_pushstring(state, error && *error ? error : "trace operation failed");
     return 2;
+}
+
+bool finite_vector(const Vector3& value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) &&
+           std::isfinite(value.z);
 }
 
 Vector3 read_vector(lua_State* state, int index) {
@@ -40,11 +50,15 @@ Vector3 read_vector(lua_State* state, int index) {
     lua_getfield(state, index, "z");
     value.z = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
+    if (!finite_vector(value)) {
+        luaL_argerror(state, index, "trace vector components must be finite");
+    }
     return value;
 }
 
 bool read_optional_vector(lua_State* state, int table, const char* key,
                           Vector3& output) {
+    table = lua_absindex(state, table);
     lua_getfield(state, table, key);
     if (lua_isnil(state, -1)) {
         lua_pop(state, 1);
@@ -67,31 +81,114 @@ void push_vector(lua_State* state, const Vector3& value) {
     lua_setfield(state, -2, "__type");
 }
 
-int entity_index_from(lua_State* state, int index) {
-    if (lua_isnoneornil(state, index)) return -1;
+bool integer_field(lua_State* state, int table, const char* field,
+                   lua_Integer& value) {
+    table = lua_absindex(state, table);
+    lua_getfield(state, table, field);
+    if (!lua_isinteger(state, -1)) {
+        lua_pop(state, 1);
+        return false;
+    }
+    value = lua_tointeger(state, -1);
+    lua_pop(state, 1);
+    return true;
+}
+
+int checked_entity_index(lua_State* state, int argument, lua_Integer raw,
+                         bool allow_negative = false) {
+    if ((!allow_negative && raw < 0) || raw < -1 ||
+        raw > std::numeric_limits<int>::max()) {
+        return luaL_argerror(state, argument,
+                             "entity index is outside the supported range");
+    }
+    return static_cast<int>(raw);
+}
+
+int entity_index_from(lua_State* state, int index, bool allow_nil = false) {
+    if (allow_nil && lua_isnoneornil(state, index)) return -1;
     if (lua_isinteger(state, index)) {
-        return static_cast<int>(lua_tointeger(state, index));
+        return checked_entity_index(state, index, lua_tointeger(state, index),
+                                    allow_nil);
     }
     luaL_checktype(state, index, LUA_TTABLE);
-    lua_getfield(state, index, "entity_index");
-    const int result = static_cast<int>(luaL_checkinteger(state, -1));
-    lua_pop(state, 1);
-    return result;
+    lua_Integer value{};
+    if (integer_field(state, index, "entity_index", value)) {
+        return checked_entity_index(state, index, value, allow_nil);
+    }
+    if (integer_field(state, index, "pawn_index", value) && value >= 0) {
+        return checked_entity_index(state, index, value, false);
+    }
+    if (integer_field(state, index, "controller_index", value)) {
+        return checked_entity_index(state, index, value, false);
+    }
+    return luaL_argerror(
+        state, index,
+        "expected an entity/index, weapon, grenade, handle, or player table");
+}
+
+void push_u64_exact(lua_State* state, std::uint64_t value) {
+    if (value <= static_cast<std::uint64_t>(
+                     std::numeric_limits<lua_Integer>::max())) {
+        lua_pushinteger(state, static_cast<lua_Integer>(value));
+        return;
+    }
+    const std::string exact = std::to_string(value);
+    lua_pushlstring(state, exact.data(), exact.size());
+}
+
+std::uint64_t read_u64_exact(lua_State* state, int index, const char* label) {
+    if (lua_isinteger(state, index)) {
+        const lua_Integer value = lua_tointeger(state, index);
+        if (value < 0) {
+            luaL_argerror(state, index, "64-bit trace values cannot be negative");
+        }
+        return static_cast<std::uint64_t>(value);
+    }
+
+    std::size_t size{};
+    const char* raw = luaL_checklstring(state, index, &size);
+    if (!raw || size == 0 || raw[0] == '-') {
+        luaL_argerror(state, index,
+                      "expected a non-negative integer or decimal/0x string");
+    }
+    const std::string text(raw, size);
+    try {
+        std::size_t parsed{};
+        const bool hexadecimal =
+            text.size() > 2 && text[0] == '0' &&
+            (text[1] == 'x' || text[1] == 'X');
+        const std::uint64_t value =
+            std::stoull(text, &parsed, hexadecimal ? 16 : 10);
+        if (parsed != text.size()) {
+            luaL_argerror(state, index,
+                          "64-bit trace value contains trailing characters");
+        }
+        return value;
+    } catch (...) {
+        std::string message = "invalid ";
+        message += label;
+        message += "; expected a non-negative integer or decimal/0x string";
+        luaL_argerror(state, index, message.c_str());
+    }
+    return 0;
 }
 
 std::uint64_t read_u64_field(lua_State* state, int table, const char* key,
                              std::uint64_t fallback) {
+    table = lua_absindex(state, table);
     lua_getfield(state, table, key);
-    const std::uint64_t value = lua_isnil(state, -1)
-                                    ? fallback
-                                    : static_cast<std::uint64_t>(
-                                          luaL_checkinteger(state, -1));
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return fallback;
+    }
+    const std::uint64_t value = read_u64_exact(state, -1, key);
     lua_pop(state, 1);
     return value;
 }
 
 std::uint16_t read_u16_field(lua_State* state, int table, const char* key,
                              std::uint16_t fallback) {
+    table = lua_absindex(state, table);
     lua_getfield(state, table, key);
     if (lua_isnil(state, -1)) {
         lua_pop(state, 1);
@@ -109,6 +206,7 @@ std::uint16_t read_u16_field(lua_State* state, int table, const char* key,
 
 std::uint8_t read_u8_field(lua_State* state, int table, const char* key,
                            std::uint8_t fallback) {
+    table = lua_absindex(state, table);
     lua_getfield(state, table, key);
     if (lua_isnil(state, -1)) {
         lua_pop(state, 1);
@@ -126,37 +224,76 @@ std::uint8_t read_u8_field(lua_State* state, int table, const char* key,
 
 float read_float_field(lua_State* state, int table, const char* key,
                        float fallback) {
+    table = lua_absindex(state, table);
     lua_getfield(state, table, key);
-    const float value = lua_isnil(state, -1)
-                            ? fallback
-                            : static_cast<float>(luaL_checknumber(state, -1));
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return fallback;
+    }
+    const float value = static_cast<float>(luaL_checknumber(state, -1));
     lua_pop(state, 1);
+    if (!std::isfinite(value)) {
+        luaL_error(state, "%s must be finite", key);
+    }
     return value;
 }
 
 bool read_bool_field(lua_State* state, int table, const char* key,
                      bool fallback) {
+    table = lua_absindex(state, table);
     lua_getfield(state, table, key);
-    const bool value = lua_isnil(state, -1) ? fallback
-                                             : lua_toboolean(state, -1) != 0;
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return fallback;
+    }
+    luaL_checktype(state, -1, LUA_TBOOLEAN);
+    const bool value = lua_toboolean(state, -1) != 0;
     lua_pop(state, 1);
     return value;
 }
 
+const char* shape_name(TraceShape shape) {
+    switch (shape) {
+        case TraceShape::Line: return "line";
+        case TraceShape::Sphere: return "sphere";
+        case TraceShape::Hull: return "hull";
+        case TraceShape::Capsule: return "capsule";
+        case TraceShape::Mesh: return "mesh";
+        default: return "unknown";
+    }
+}
+
+TraceShape read_shape_value(lua_State* state, int index) {
+    if (lua_isinteger(state, index)) {
+        const lua_Integer value = lua_tointeger(state, index);
+        if (value < static_cast<lua_Integer>(TraceShape::Line) ||
+            value > static_cast<lua_Integer>(TraceShape::Mesh)) {
+            luaL_argerror(state, index, "trace shape is out of range");
+        }
+        return static_cast<TraceShape>(value);
+    }
+    const std::string_view value = luaL_checkstring(state, index);
+    if (value == "line" || value == "ray") return TraceShape::Line;
+    if (value == "sphere") return TraceShape::Sphere;
+    if (value == "hull" || value == "box") return TraceShape::Hull;
+    if (value == "capsule") return TraceShape::Capsule;
+    if (value == "mesh") return TraceShape::Mesh;
+    luaL_argerror(state, index,
+                  "trace shape must be line, sphere, hull, capsule, or mesh");
+    return TraceShape::Line;
+}
+
 TraceShape read_shape_field(lua_State* state, int table,
                             TraceShape fallback) {
+    table = lua_absindex(state, table);
     lua_getfield(state, table, "shape");
     if (lua_isnil(state, -1)) {
         lua_pop(state, 1);
         return fallback;
     }
-    const lua_Integer value = luaL_checkinteger(state, -1);
+    const TraceShape value = read_shape_value(state, -1);
     lua_pop(state, 1);
-    if (value < static_cast<lua_Integer>(TraceShape::Line) ||
-        value > static_cast<lua_Integer>(TraceShape::Mesh)) {
-        luaL_error(state, "trace shape is out of range");
-    }
-    return static_cast<TraceShape>(value);
+    return value;
 }
 
 void append_ignore(lua_State* state, TraceRequest& request, int value) {
@@ -174,25 +311,24 @@ void append_ignore(lua_State* state, TraceRequest& request, int value) {
 void read_ignore_value(lua_State* state, int index, TraceRequest& request) {
     if (lua_isnoneornil(state, index)) return;
     if (lua_isinteger(state, index)) {
-        append_ignore(state, request,
-                      static_cast<int>(lua_tointeger(state, index)));
+        append_ignore(state, request, entity_index_from(state, index, true));
         return;
     }
     luaL_checktype(state, index, LUA_TTABLE);
 
-    lua_getfield(state, index, "entity_index");
-    if (!lua_isnil(state, -1)) {
+    lua_Integer direct{};
+    if (integer_field(state, index, "entity_index", direct) ||
+        (integer_field(state, index, "pawn_index", direct) && direct >= 0) ||
+        integer_field(state, index, "controller_index", direct)) {
         append_ignore(state, request,
-                      static_cast<int>(luaL_checkinteger(state, -1)));
-        lua_pop(state, 1);
+                      checked_entity_index(state, index, direct, true));
         return;
     }
-    lua_pop(state, 1);
 
     const lua_Integer length = luaL_len(state, index);
     for (lua_Integer item = 1; item <= length; ++item) {
         lua_geti(state, index, item);
-        append_ignore(state, request, entity_index_from(state, -1));
+        append_ignore(state, request, entity_index_from(state, -1, true));
         lua_pop(state, 1);
     }
 }
@@ -217,6 +353,7 @@ void read_mesh_table(lua_State* state, int index, TraceRequest& request) {
 
 bool read_optional_mesh(lua_State* state, int table, const char* key,
                         TraceRequest& request) {
+    table = lua_absindex(state, table);
     lua_getfield(state, table, key);
     if (lua_isnil(state, -1)) {
         lua_pop(state, 1);
@@ -228,7 +365,9 @@ bool read_optional_mesh(lua_State* state, int table, const char* key,
 }
 
 void read_options(lua_State* state, int table, TraceRequest& request) {
-    if (!lua_istable(state, table)) return;
+    if (lua_isnoneornil(state, table)) return;
+    luaL_checktype(state, table, LUA_TTABLE);
+    table = lua_absindex(state, table);
 
     request.shape = read_shape_field(state, table, request.shape);
     request.contents_mask =
@@ -271,6 +410,7 @@ void read_options(lua_State* state, int table, TraceRequest& request) {
         read_bool_field(state, table, "hit_entities", request.hit_entities);
     read_optional_vector(state, table, "mins", request.mins);
     read_optional_vector(state, table, "maxs", request.maxs);
+    read_optional_vector(state, table, "center", request.center_a);
     read_optional_vector(state, table, "center_a", request.center_a);
     read_optional_vector(state, table, "center_b", request.center_b);
     if (!read_optional_mesh(state, table, "mesh_vertices", request)) {
@@ -285,8 +425,15 @@ void read_options(lua_State* state, int table, TraceRequest& request) {
     lua_pop(state, 1);
 }
 
+float vector_distance(const Vector3& left, const Vector3& right) {
+    const float x = right.x - left.x;
+    const float y = right.y - left.y;
+    const float z = right.z - left.z;
+    return std::sqrt(x * x + y * y + z * z);
+}
+
 void push_result(lua_State* state, const TraceResult& result) {
-    lua_createtable(state, 0, 48);
+    lua_createtable(state, 0, 58);
 #define SET_BOOL(name)                                                         \
     lua_pushboolean(state, result.name);                                       \
     lua_setfield(state, -2, #name)
@@ -313,14 +460,8 @@ void push_result(lua_State* state, const TraceResult& result) {
     SET_INT(hitgroup);
     SET_INT(surface_flags);
     SET_INT(contents);
-    SET_INT(contents64);
     SET_INT(triangle);
     SET_INT(bone);
-    SET_INT(physics_body);
-    SET_INT(physics_shape);
-    SET_INT(shape_interacts_as);
-    SET_INT(shape_interacts_with);
-    SET_INT(shape_interacts_exclude);
     SET_INT(shape_entity_id);
     SET_INT(shape_owner_id);
     SET_INT(shape_hierarchy_id);
@@ -329,15 +470,34 @@ void push_result(lua_State* state, const TraceResult& result) {
     SET_INT(shape_target_detail_layer);
     SET_INT(shape_collision_group);
     SET_INT(shape_collision_function_mask);
-    lua_pushinteger(state, static_cast<lua_Integer>(result.shape));
-    lua_setfield(state, -2, "shape");
 #undef SET_NUM
 #undef SET_INT
 #undef SET_BOOL
+
+    push_u64_exact(state, result.contents64);
+    lua_setfield(state, -2, "contents64");
+    push_u64_exact(state, static_cast<std::uint64_t>(result.physics_body));
+    lua_setfield(state, -2, "physics_body");
+    push_u64_exact(state, static_cast<std::uint64_t>(result.physics_shape));
+    lua_setfield(state, -2, "physics_shape");
+    push_u64_exact(state, result.shape_interacts_as);
+    lua_setfield(state, -2, "shape_interacts_as");
+    push_u64_exact(state, result.shape_interacts_with);
+    lua_setfield(state, -2, "shape_interacts_with");
+    push_u64_exact(state, result.shape_interacts_exclude);
+    lua_setfield(state, -2, "shape_interacts_exclude");
+
+    lua_pushinteger(state, static_cast<lua_Integer>(result.shape));
+    lua_setfield(state, -2, "shape");
+    lua_pushstring(state, shape_name(result.shape));
+    lua_setfield(state, -2, "shape_name");
+
     push_vector(state, result.start);
     lua_setfield(state, -2, "start");
     push_vector(state, result.end);
     lua_setfield(state, -2, "end_position");
+    push_vector(state, result.end);
+    lua_setfield(state, -2, "end");
     push_vector(state, result.hit_position);
     lua_setfield(state, -2, "position");
     push_vector(state, result.hit_position);
@@ -348,15 +508,37 @@ void push_result(lua_State* state, const TraceResult& result) {
     lua_setfield(state, -2, "plane_normal");
     lua_pushstring(state, result.surface_name);
     lua_setfield(state, -2, "surface_name");
+
+    const float total_distance = vector_distance(result.start, result.end);
+    lua_pushnumber(state, total_distance);
+    lua_setfield(state, -2, "total_distance");
+    lua_pushnumber(state, std::max(0.0f, total_distance - result.distance));
+    lua_setfield(state, -2, "remaining_distance");
+    lua_pushboolean(state, result.hit && result.entity_index >= 0);
+    lua_setfield(state, -2, "hit_entity");
+    lua_pushboolean(state, result.hit && result.entity_index < 0);
+    lua_setfield(state, -2, "hit_world");
+
+    luaL_getmetatable(state, kTraceResultMeta);
+    lua_setmetatable(state, -2);
 }
 
 int run(lua_State* state, const TraceRequest& request) {
     const auto* api = advanced();
     TraceResult result;
-    char error[256]{};
+    char error[512]{};
     if (!api || !api->trace ||
         !api->trace(api->context, &request, &result, error, sizeof(error))) {
         return fail(state, error[0] ? error : "trace service is unavailable");
+    }
+    if (!result.valid || !std::isfinite(result.fraction) ||
+        result.fraction < 0.0f || result.fraction > 1.0f ||
+        !std::isfinite(result.distance) || result.distance < 0.0f ||
+        !finite_vector(result.start) || !finite_vector(result.end) ||
+        !finite_vector(result.hit_position) ||
+        !finite_vector(result.plane_normal)) {
+        return fail(state,
+                    "Source 2 returned an invalid or non-finite trace result");
     }
     push_result(state, result);
     return 1;
@@ -390,6 +572,9 @@ int sphere(lua_State* state) {
     request.end = read_vector(state, 2);
     request.center_a = read_vector(state, 3);
     request.radius = static_cast<float>(luaL_checknumber(state, 4));
+    if (!std::isfinite(request.radius)) {
+        return luaL_argerror(state, 4, "sphere radius must be finite");
+    }
     read_options(state, 5, request);
     request.shape = TraceShape::Sphere;
     request.use_hull = false;
@@ -403,6 +588,9 @@ int capsule(lua_State* state) {
     request.center_a = read_vector(state, 3);
     request.center_b = read_vector(state, 4);
     request.radius = static_cast<float>(luaL_checknumber(state, 5));
+    if (!std::isfinite(request.radius)) {
+        return luaL_argerror(state, 5, "capsule radius must be finite");
+    }
     read_options(state, 6, request);
     request.shape = TraceShape::Capsule;
     request.use_hull = false;
@@ -434,7 +622,93 @@ int cast(lua_State* state) {
     return run(state, request);
 }
 
+int direction(lua_State* state) {
+    TraceRequest request;
+    request.start = read_vector(state, 1);
+    const Vector3 direction_value = read_vector(state, 2);
+    const float distance = static_cast<float>(luaL_checknumber(state, 3));
+    if (!std::isfinite(distance) || distance < 0.0f) {
+        return luaL_argerror(state, 3,
+                             "trace direction distance must be finite and non-negative");
+    }
+    const float length = std::sqrt(
+        direction_value.x * direction_value.x +
+        direction_value.y * direction_value.y +
+        direction_value.z * direction_value.z);
+    if (distance > 0.0f && (!std::isfinite(length) || length <= 0.0f)) {
+        return luaL_argerror(state, 2,
+                             "trace direction must be non-zero for a positive distance");
+    }
+    if (distance == 0.0f) {
+        request.end = request.start;
+    } else {
+        const float scale = distance / length;
+        request.end = {request.start.x + direction_value.x * scale,
+                       request.start.y + direction_value.y * scale,
+                       request.start.z + direction_value.z * scale};
+    }
+    read_options(state, 4, request);
+    request.shape = TraceShape::Line;
+    request.use_hull = false;
+    return run(state, request);
+}
+
 int ray(lua_State* state) { return line(state); }
+
+bool result_bool(lua_State* state, const char* key) {
+    lua_getfield(state, 1, key);
+    const bool value = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    return value;
+}
+
+int result_entity(lua_State* state) {
+    lua_getfield(state, 1, "entity_index");
+    const int value = static_cast<int>(luaL_checkinteger(state, -1));
+    lua_pop(state, 1);
+    return value;
+}
+
+int result_did_hit(lua_State* state) {
+    luaL_checktype(state, 1, LUA_TTABLE);
+    lua_pushboolean(state, result_bool(state, "hit"));
+    return 1;
+}
+
+int result_hit_world(lua_State* state) {
+    luaL_checktype(state, 1, LUA_TTABLE);
+    lua_pushboolean(state,
+                    result_bool(state, "hit") && result_entity(state) < 0);
+    return 1;
+}
+
+int result_hit_entity(lua_State* state) {
+    luaL_checktype(state, 1, LUA_TTABLE);
+    const int hit_entity = result_entity(state);
+    if (lua_isnoneornil(state, 2)) {
+        lua_pushboolean(state,
+                        result_bool(state, "hit") && hit_entity >= 0);
+        return 1;
+    }
+    const int expected = entity_index_from(state, 2);
+    lua_pushboolean(state,
+                    result_bool(state, "hit") && hit_entity == expected);
+    return 1;
+}
+
+int result_tostring(lua_State* state) {
+    luaL_checktype(state, 1, LUA_TTABLE);
+    lua_getfield(state, 1, "shape_name");
+    const char* shape = luaL_checkstring(state, -1);
+    lua_pop(state, 1);
+    lua_getfield(state, 1, "fraction");
+    const lua_Number fraction = luaL_checknumber(state, -1);
+    lua_pop(state, 1);
+    lua_pushfstring(state, "TraceResult(%s, hit=%s, fraction=%.4f)", shape,
+                    result_bool(state, "hit") ? "true" : "false",
+                    static_cast<double>(fraction));
+    return 1;
+}
 
 void add_function(lua_State* state, const Services* api, const char* name,
                   lua_CFunction function) {
@@ -444,7 +718,7 @@ void add_function(lua_State* state, const Services* api, const char* name,
 }
 
 void add_mask(lua_State* state, const char* name, std::uint64_t value) {
-    lua_pushinteger(state, static_cast<lua_Integer>(value));
+    push_u64_exact(state, value);
     lua_setfield(state, -2, name);
 }
 
@@ -566,12 +840,27 @@ LUACS_MODULE_EXPORT int LuaCS_OpenModule(lua_State* state,
     if (!advanced()) {
         return luaL_error(state, "LuaCS advanced world services are unavailable");
     }
-    lua_createtable(state, 0, 72);
+
+    if (luaL_newmetatable(state, kTraceResultMeta)) {
+        lua_newtable(state);
+        add_function(state, api, "did_hit", &result_did_hit);
+        add_function(state, api, "hit_world", &result_hit_world);
+        add_function(state, api, "hit_entity", &result_hit_entity);
+        lua_setfield(state, -2, "__index");
+        add_function(state, api, "__tostring", &result_tostring);
+    }
+    lua_pop(state, 1);
+
+    lua_createtable(state, 0, 80);
     add_function(state, api, "cast", &cast);
     add_function(state, api, "ray", &ray);
     add_function(state, api, "line", &line);
+    add_function(state, api, "segment", &line);
+    add_function(state, api, "direction", &direction);
+    add_function(state, api, "from_direction", &direction);
     add_function(state, api, "sphere", &sphere);
     add_function(state, api, "hull", &hull);
+    add_function(state, api, "box", &hull);
     add_function(state, api, "capsule", &capsule);
     add_function(state, api, "mesh", &mesh);
     add_trace_constants(state);
