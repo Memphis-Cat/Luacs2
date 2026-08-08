@@ -40,7 +40,15 @@ if not defined BUILD_COMMIT (
 rem A commit-only stamp is trustworthy only when all tracked source/index files
 rem match that commit. Untracked build/dependency outputs are intentionally ignored.
 set "TRACKED_DIRTY="
-for /f "delims=" %%S in ('git status --porcelain --untracked-files^=no 2^>nul') do set "TRACKED_DIRTY=1"
+
+rem Check unstaged tracked-file changes.
+git diff --quiet --
+if errorlevel 1 set "TRACKED_DIRTY=1"
+
+rem Check staged tracked-file changes.
+git diff --cached --quiet --
+if errorlevel 1 set "TRACKED_DIRTY=1"
+
 if defined TRACKED_DIRTY (
   echo ERROR: Refusing to stamp a build from modified or staged tracked files.
   echo Commit or revert tracked source changes before running build.bat.
