@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.26)
-project(LuaCS VERSION 0.5.0 LANGUAGES C CXX)
+project(LuaCS VERSION 1.0.0 LANGUAGES C CXX)
 
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "LuaCS currently targets 64-bit Windows CS2 servers only.")
