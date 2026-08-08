@@ -1,8 +1,10 @@
 # LuaCS
 
+**BETA TESTING 1.0**
+
 LuaCS is a Windows x64 Metamod:Source runtime that embeds Lua 5.5.1 for Counter-Strike 2 dedicated-server plugins.
 
-Version `0.5.0` includes:
+BETA TESTING 1.0 includes:
 
 - isolated Lua states and authenticated encrypted `.smg` packages;
 - server-console plugin administration through the `lua` command;
@@ -12,6 +14,8 @@ Version `0.5.0` includes:
 - weapons, inventory, clips, reserve ammo, and player ammo access;
 - HUD output and Source 2 cvars;
 - team, round, entity, sound, schema-property, trace, and grenade APIs.
+
+This is a beta testing release. CS2 updates can change signatures, schema fields, or engine behavior, so server owners should expect compatibility fixes while LuaCS is still in beta.
 
 Unsupported or unresolved operations return explicit errors. The Windows build keeps MSVC `/WX` enabled, so compiler warnings fail the build instead of being hidden.
 
@@ -55,10 +59,9 @@ Run from an x64 Visual Studio Developer Command Prompt:
 
 ```bat
 build.bat --no-deploy
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\tests\compiler-smoke.ps1"
 ```
 
-Deploy to a CS2 `game\csgo` directory after both commands succeed:
+Deploy to a CS2 `game\csgo` directory after the build succeeds:
 
 ```bat
 deploy.bat "F:\steamcmd2\steamapps\common\Counter-Strike Global Offensive\game\csgo"
@@ -126,6 +129,8 @@ lua plugins retry
 lua plugins force_load <file.lua|file.smg|plugin name>
 lua plugins force_unload <file.lua|file.smg|plugin name>
 ```
+
+`lua version` reports LuaCS as **BETA TESTING 1.0** and also reports the embedded Lua language version separately.
 
 `retry` retries only packages whose most recent load failed. `list` and `info` show loaded, unloaded, failed, or missing state; failed entries include their last load error. Declared plugin names become available after the package has loaded successfully at least once.
 
@@ -210,19 +215,8 @@ LuaCS acquires the live `IGameEventManager2` interface from the Source 2 engine 
 
 Required CS2 function signatures are validated individually. Startup errors name every unresolved signature instead of returning one combined, ambiguous error.
 
-## Validation
+## Beta status
 
-The smoke test validates:
+BETA TESTING 1.0 is the first public beta-testing release of LuaCS. It is intended for current Windows x64 CS2 dedicated servers running Metamod:Source.
 
-- a clean MSVC x64 build with warnings treated as errors;
-- all 17 native DLLs in the package;
-- direct live game-event interface wiring;
-- registration of the server-console `lua` command;
-- every documented plugin lifecycle command and metadata field;
-- SMG compilation, incremental caching, corruption recovery, and syntax-error preservation;
-- safe weapon inventory replacement and slot classification;
-- verified schema-property path resolution, typed/raw access, reflection, collections, and property references;
-- exact 64-bit trace masks/results, all five Source 2 trace shapes, and final trace output guards;
-- schema-native transactional grenades, mutable grenade objects, type/filter helpers, and final grenade output guards.
-
-CI does not run a Windows CS2 dedicated server. Live engine behavior must still be tested on a current server and loaded map; unavailable signatures, fields, entities, recipients, or rules produce explicit errors.
+LuaCS contains defensive validation around native engine access, but CS2 is a moving target. A game update can invalidate signatures, schema paths, or assumptions used by native modules. If LuaCS fails to start or a Lua plugin encounters a native/runtime error, check `addons/LuaCS/logs/luacs-errors.log` and include the relevant error when reporting the issue.
