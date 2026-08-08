@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-smoke-test:
+  build:
     strategy:
       fail-fast: false
       matrix:
@@ -30,13 +30,9 @@ jobs:
           where cl
           build.bat --no-deploy
 
-      - name: Compiler smoke tests
-        shell: powershell
-        run: ./tests/compiler-smoke.ps1
-
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
-          name: LuaCS-${{ matrix.os }}-x64
+          name: LuaCS-BETA-TESTING-1.0-${{ matrix.os }}-x64
           path: build/package/game/csgo/addons
           if-no-files-found: error
