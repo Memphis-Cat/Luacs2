@@ -73,6 +73,8 @@ SHAPE_CAPSULE
 SHAPE_MESH
 ```
 
+`traces.shapes` maps the canonical lowercase names to the same IDs.
+
 ## Direction traces
 
 ```text
@@ -148,6 +150,8 @@ OBJECTS_ALL_GAME_ENTITIES = 14
 OBJECTS_ALL = 15
 ```
 
+`traces.objects` maps the lowercase object-set names to these IDs.
+
 ## TraceResult
 
 Important fields:
@@ -159,13 +163,17 @@ start_solid
 all_solid
 exact_hit_point
 fraction
+fraction_left_solid
+fraction_left_solid_available
 start
 end / end_position
 position / hit_position
 normal / plane_normal
+plane_distance
 distance
 total_distance
 remaining_distance
+hit_offset
 entity_index
 entity_handle
 hit_entity
@@ -185,17 +193,27 @@ physics_shape
 shape_interacts_as
 shape_interacts_with
 shape_interacts_exclude
+shape_entity_id
+shape_owner_id
+shape_hierarchy_id
+shape_detail_layer_mask
+shape_detail_layer_mask_type
+shape_target_detail_layer
+shape_collision_group
+shape_collision_function_mask
 ```
 
-Methods:
+The boolean fields `hit_world` and `hit_entity` are data fields, so the verified module exposes callable helpers under distinct names:
 
 ```lua
 result:did_hit()
-result:hit_world()
-result:hit_entity()
-result:hit_entity(entity_or_player)
+result:did_hit_world()
+result:did_hit_entity()
+result:did_hit_entity(entity_or_player)
 ```
 
-The result's boolean fields `hit_world`/`hit_entity` describe the native result. The callable methods resolve the same concepts through the result metatable.
+`did_hit_entity()` with no argument checks whether any entity was hit. With an argument it compares the result against the resolved entity/player index.
+
+`fraction_left_solid_available` is currently false because Source 2 `CGameTrace` does not provide the old Source 1 `fractionleftsolid` value. LuaCS does not fabricate it.
 
 LuaCS validates fractions, entity indexes, distances, vectors, masks, and returned native state before exposing a result.
