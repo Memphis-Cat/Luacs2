@@ -36,6 +36,7 @@ constexpr std::string_view kYellow = "\x1b[93m";
 constexpr std::string_view kRed = "\x1b[91m";
 constexpr std::string_view kWhite = "\x1b[97m";
 constexpr std::string_view kGray = "\x1b[90m";
+constexpr std::string_view kLuaCSDisplayVersion = "BETA TESTING 1.0";
 
 constexpr std::array<std::string_view, 15> kKnownCs2Modules{
     "cs2.events",     "cs2.timers",   "cs2.players", "cs2.commands",
@@ -458,15 +459,11 @@ std::string format_bytes(std::size_t bytes) {
 }
 
 void print_header(const std::filesystem::path& plugins_dir) {
-    std::cout
-        << "\n" << kCyan << kBold
-        << "╭──────────────────────────────────────────────────────────────╮\n"
-        << "│                       LuaCS Compiler                         │\n"
-        << "╰──────────────────────────────────────────────────────────────╯"
-        << kReset << "\n"
-        << kDim
-        << "  Lua 5.5.1  •  authenticated SMG bytecode  •  incremental build\n"
-        << "  Output: " << path_text(plugins_dir) << kReset << "\n\n";
+    std::cout << "\n" << kCyan << kBold << "LuaCS Compiler - "
+              << kLuaCSDisplayVersion << kReset << "\n"
+              << kDim
+              << "Lua 5.5.1 | authenticated SMG bytecode | incremental build\n"
+              << "Output: " << path_text(plugins_dir) << kReset << "\n\n";
 }
 
 void print_report(const std::filesystem::path& source,
@@ -478,45 +475,38 @@ void print_report(const std::filesystem::path& source,
                                                          : "COMPILED")
                                         : "FAILED";
 
-    std::cout << kGray << "╭─ " << kWhite << kBold
-              << path_text(source.filename()) << kReset << kGray
-              << "\n│\n│  " << status_color << "● " << status << kReset
-              << kGray << "\n";
+    std::cout << kGray << "-- " << kWhite << kBold
+              << path_text(source.filename()) << kReset << "\n"
+              << status_color << "[" << status << "]" << kReset << "\n";
 
     if (report.success) {
-        std::cout
-            << "│\n"
-            << "│  " << kDim << "Code size           " << kReset
-            << format_bytes(report.code_size) << "\n"
-            << kGray << "│  " << kDim << "Data size           " << kReset
-            << format_bytes(report.data_size) << "\n"
-            << kGray << "│  " << kDim << "Stack/heap size     " << kReset
-            << format_bytes(report.working_memory)
-            << (report.cached
-                    ? "  " + std::string(kDim) +
-                          "(cached; no Lua VM created)" + std::string(kReset)
-                    : "")
-            << "\n"
-            << kGray << "│  " << kDim << "Total requirements  " << kReset
-            << format_bytes(report.total_requirements) << "\n"
-            << kGray << "│\n"
-            << "│  " << kDim << "Compilation time    " << kReset
-            << std::fixed << std::setprecision(3) << report.elapsed_seconds
-            << " sec\n"
-            << kGray << "│  " << kDim << "Output              " << kReset
-            << report.output_path << "\n";
+        std::cout << kDim << "Code size:          " << kReset
+                  << format_bytes(report.code_size) << "\n"
+                  << kDim << "Data size:          " << kReset
+                  << format_bytes(report.data_size) << "\n"
+                  << kDim << "Stack/heap size:    " << kReset
+                  << format_bytes(report.working_memory)
+                  << (report.cached
+                          ? "  " + std::string(kDim) +
+                                "(cached; no Lua VM created)" + std::string(kReset)
+                          : "")
+                  << "\n"
+                  << kDim << "Total requirements: " << kReset
+                  << format_bytes(report.total_requirements) << "\n"
+                  << kDim << "Compilation time:   " << kReset
+                  << std::fixed << std::setprecision(3) << report.elapsed_seconds
+                  << " sec\n"
+                  << kDim << "Output:             " << kReset
+                  << report.output_path << "\n";
     } else {
-        std::cout << "│\n│  " << kRed << report.error << kReset << "\n";
+        std::cout << kRed << report.error << kReset << "\n";
     }
 
     for (const auto& warning : report.warnings) {
-        std::cout << kGray << "│  " << kYellow << "⚠ " << warning << kReset
-                  << "\n";
+        std::cout << kYellow << "WARNING: " << warning << kReset << "\n";
     }
 
-    std::cout << kGray
-              << "│\n╰──────────────────────────────────────────────────────────────"
-              << kReset << "\n\n";
+    std::cout << "\n";
 }
 
 CompileReport compile_one(
@@ -644,9 +634,9 @@ void print_summary(std::size_t compiled, std::size_t cached,
                    std::size_t failed, double elapsed) {
     std::cout << kBold << "Build summary" << kReset << "\n"
               << "  " << kGreen << compiled << " compiled" << kReset
-              << "  •  " << kCyan << cached << " cached" << kReset
-              << "  •  " << (failed ? kRed : kDim) << failed << " failed"
-              << kReset << "  •  " << std::fixed << std::setprecision(3)
+              << " | " << kCyan << cached << " cached" << kReset
+              << " | " << (failed ? kRed : kDim) << failed << " failed"
+              << kReset << " | " << std::fixed << std::setprecision(3)
               << elapsed << " sec total\n";
 }
 
@@ -684,7 +674,7 @@ int wmain(int argc, wchar_t** argv) {
 
     if (show_help) {
         std::cout
-            << "LuaCS Compiler\n\n"
+            << "LuaCS Compiler - " << kLuaCSDisplayVersion << "\n\n"
             << "  compile.exe                 Compile every .lua file beside the executable\n"
             << "  compile.exe plugin.lua      Compile one or more specific files\n"
             << "  compile.exe --no-pause      Never wait for Enter before exiting\n"
