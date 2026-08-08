@@ -22,7 +22,7 @@ extern "C" {
 
 namespace luacs {
 
-inline constexpr std::string_view kLuaCSVersion = "0.5.0";
+inline constexpr std::string_view kLuaCSVersion = "BETA TESTING 1.0";
 
 struct PlayerSnapshot {
     int slot{-1};
