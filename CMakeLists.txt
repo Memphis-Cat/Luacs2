@@ -218,6 +218,7 @@ endforeach()
 
 add_library(luacs2 SHARED
     src/plugin/plugin.cpp
+    src/plugin/centerhtml_command.cpp
     src/plugin/plugin.h
     src/plugin/game_api.cpp
     src/plugin/game_api_players.cpp
@@ -281,6 +282,9 @@ add_custom_target(luacs_package ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/packaging/LuaCS/scripting/example_welcome.lua"
         "${LUACS_SCRIPTING}/example_welcome.lua"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/packaging/LuaCS/scripting/awp_scout_roulette.lua"
+        "${LUACS_SCRIPTING}/awp_scout_roulette.lua"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/packaging/LuaCS/config/README.txt"
         "${LUACS_ROOT}/config/README.txt"
