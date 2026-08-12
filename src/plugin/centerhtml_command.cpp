@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <eiface.h>
 #include <igameevents.h>
 #include <playerslot.h>
 #include <tier0/dbg.h>
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <string>
 
+extern IVEngineServer* g_engine;
 extern IGameEventManager2* g_game_events;
 
 namespace {
@@ -90,9 +92,39 @@ void command_center_html(const CCommandContext&, const CCommand& command) {
     g_game_events->FreeEvent(event);
 }
 
+void server_command_bridge_changed(CConVar<CUtlString>*, CSplitScreenSlot,
+                                   const CUtlString* new_value,
+                                   const CUtlString*) {
+    if (!g_engine || !new_value) return;
+
+    const char* raw = new_value->Get();
+    if (!raw || !*raw) return;
+
+    std::string request(raw);
+    const std::size_t separator = request.find('|');
+    std::string command = separator == std::string::npos
+                              ? request
+                              : request.substr(separator + 1);
+
+    if (command.empty() || command.size() > 4096 ||
+        command.find('\0') != std::string::npos) {
+        Warning("LuaCS: luacs_server_command rejected an invalid command.\n");
+        return;
+    }
+
+    if (command.back() != '\n') command.push_back('\n');
+    g_engine->ServerCommand(command.c_str());
+}
+
 ConCommand g_luacs_center_html_command(
     "luacs_centerhtml", ConCommandCallbackInfo_t(&command_center_html),
     "Internal LuaCS center-HTML bridge. Usage: luacs_centerhtml <slot> <duration> <html>.",
     FCVAR_RELEASE);
+
+CConVar<CUtlString> g_luacs_server_command_bridge(
+    "luacs_server_command",
+    FCVAR_RELEASE | FCVAR_HIDDEN | FCVAR_DONTRECORD,
+    "Internal LuaCS server-command bridge. Value format: nonce|command.",
+    CUtlString(""), &server_command_bridge_changed);
 
 } // namespace
