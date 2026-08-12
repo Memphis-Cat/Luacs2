@@ -218,6 +218,7 @@ endforeach()
 
 add_library(luacs2 SHARED
     src/plugin/plugin.cpp
+    src/plugin/centerhtml_command.cpp
     src/plugin/plugin.h
     src/plugin/game_api.cpp
     src/plugin/game_api_players.cpp
