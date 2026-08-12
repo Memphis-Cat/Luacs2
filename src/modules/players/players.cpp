@@ -107,16 +107,16 @@ void apply_state(lua_State* state, int table, const PlayerState& value) {
 void push_player(lua_State* state, const Services* api, const PlayerInfo& player,
                  bool refresh_live = true) {
     lua_createtable(state, 0, 28);
-    set_int(state, -2, "slot", player.slot);
+    set_int(state, -1, "slot", player.slot);
     lua_pushstring(state, player.name ? player.name : "");
     lua_setfield(state, -2, "name");
     luacs::lua_checked::push_u64_exact(state, player.steam64);
     lua_setfield(state, -2, "steam64");
     lua_pushstring(state, player.steam_id ? player.steam_id : "");
     lua_setfield(state, -2, "steamid");
-    set_bool(state, -2, "fake", player.fake);
-    set_bool(state, -2, "connected", player.connected);
-    set_bool(state, -2, "active", player.active);
+    set_bool(state, -1, "fake", player.fake);
+    set_bool(state, -1, "connected", player.connected);
+    set_bool(state, -1, "active", player.active);
 
     if (refresh_live && api->player_state && player.slot >= 0 &&
         player.slot < 64) {
@@ -127,10 +127,10 @@ void push_player(lua_State* state, const Services* api, const PlayerInfo& player
             valid_player_state(live)) {
             apply_state(state, -1, live);
         } else {
-            set_bool(state, -2, "valid", false);
-            set_bool(state, -2, "has_controller", false);
-            set_bool(state, -2, "has_pawn", false);
-            set_bool(state, -2, "alive", false);
+            set_bool(state, -1, "valid", false);
+            set_bool(state, -1, "has_controller", false);
+            set_bool(state, -1, "has_pawn", false);
+            set_bool(state, -1, "alive", false);
         }
     }
 
